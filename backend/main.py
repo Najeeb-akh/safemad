@@ -11,7 +11,7 @@ from . import auth
 from .routers import material_detection
 from .routers import floor_plan
 from .routers import annotation
-from .routers import floor_plan_test
+
 from .routers import wall_thickness
 from .routers import structured_data
 from .routers import structured_safety_router
@@ -51,7 +51,6 @@ app.add_middleware(
 app.include_router(material_detection.router, prefix="/api", tags=["material"])
 app.include_router(floor_plan.router, prefix="/api", tags=["floor_plan"])
 app.include_router(annotation.router, prefix="/api", tags=["annotation"])
-app.include_router(floor_plan_test.router, prefix="/api", tags=["floor_plan_test"])
 app.include_router(wall_thickness.router, prefix="/api", tags=["wall_thickness"])
 
 # New structured data system routers
