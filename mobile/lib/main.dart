@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'screens/login_screen.dart';
+import 'package:flutter/services.dart';
+import 'theme/app_theme.dart';
+import 'screens/start_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/home_mapping_screen.dart';
 import 'screens/enhanced_detection_results_screen.dart';
@@ -13,27 +15,40 @@ class SafeMadApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SafeMad',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-          ),
-        ),
+    // Set system UI overlay style
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
       ),
-      initialRoute: '/login',
+    );
+
+    return MaterialApp(
+      title: 'SafeMad - Emergency Shelter Finder',
+      debugShowCheckedModeBanner: false,
+      
+      // Modern Material 3 Theme
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.system,
+      
+      // Updated routing - start with start screen instead of login
+      initialRoute: '/',
       routes: {
-        '/login': (context) => const LoginScreen(),
+        '/': (context) => const StartScreen(),
         '/register': (context) => const RegisterScreen(),
         '/home_mapping': (context) => const HomeMappingScreen(),
         '/enhanced_results': (context) => const EnhancedDetectionResultsScreen(detectionResult: {}),
-        // Add more routes as needed
+      },
+      
+      // Error handling
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaleFactor: 1.0),
+          child: child ?? const SizedBox(),
+        );
       },
     );
   }

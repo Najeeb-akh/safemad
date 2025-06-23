@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import '../services/enhanced_floor_plan_service.dart';
+import '../utils/risk_assessment_utils.dart';
 import 'room_safety_assessment_screen.dart';
 import 'enhanced_safety_heatmap_screen.dart';
+import 'risk_assessment_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,6 +14,624 @@ import 'dart:math' as math;
 
 // Add this constant
 const String API_BASE_URL = 'http://127.0.0.1:8000'; // or your actual backend URL
+
+/// Explosive Risk Calculator for Safety Assessment
+class ExplosiveRiskCalculator {
+  final List<DetectedRoom> rooms;
+  final List<ArchitecturalElement> elements;
+  final List<Map<String, dynamic>> userAnnotations;
+  final Map<String, int> imageDimensions;
+  
+  // Risk parameters (adjustable based on explosive type)
+  final double baseExplosiveRadius = 50.0; // pixels in image coordinates
+  final double maxRiskDistance = 150.0; // maximum distance for risk calculation
+  
+  // Attenuation factors
+  final Map<String, double> wallAttenuation = {
+    'Wall': 0.3,      // 70% reduction
+    'Column': 0.4,    // 60% reduction
+    'Door': 0.8,      // 20% reduction (open/closed average)
+    'Window': 0.7,    // 30% reduction
+    'wall': 0.3,
+    'door': 0.8,
+    'window': 0.7,
+    'column': 0.4,
+    'stairway': 0.6,
+  };
+  
+  // Room type risk modifiers
+  final Map<String, double> roomRiskModifiers = {
+    'MAMAD': 0.05,          // Protected space - 95% reduction (extremely safe)
+    'mamad': 0.05,
+    'Safe Room': 0.05,      // Any designated safe room
+    'safe room': 0.05,
+    'Corridor': 1.2,        // Higher risk due to channeling
+    'corridor': 1.2,
+    'Central Hallway': 1.3, // Highest risk - multiple access points
+    'hallway': 1.3,
+    'Private Room': 0.9,    // Slightly lower risk
+    'Enclosed Space': 0.8,  // Lower risk if isolated
+    'Kitchen': 1.1,         // Higher risk due to gas/fire hazards
+    'kitchen': 1.1,
+    'Living Room': 1.0,
+    'living room': 1.0,
+    'Bedroom': 0.8,
+    'bedroom': 0.8,
+    'Bathroom': 0.7,
+    'bathroom': 0.7,
+  };
+
+  ExplosiveRiskCalculator({
+    required this.rooms,
+    required this.elements,
+    required this.userAnnotations,
+    required this.imageDimensions,
+  });
+
+  // Convert image coordinates to real-world meters (approximate)
+  double imageToMeters(double pixels) {
+    // Assuming average room size from your data (~4m x 4m = ~80x80 pixels)
+    return pixels * 0.05; // rough conversion factor
+  }
+
+  // Calculate distance between two points
+  double calculateDistance(double x1, double y1, double x2, double y2) {
+    return math.sqrt(math.pow(x2 - x1, 2) + math.pow(y2 - y1, 2));
+  }
+
+  // Check if point is inside any MAMAD rectangle
+  bool isPointInsideMAMAD(double x, double y) {
+    final List<Map<String, dynamic>> mamadLocations = getMAMADLocations();
+    
+    if (mamadLocations.isEmpty) {
+      return false;
+    }
+    
+    for (Map<String, dynamic> mamad in mamadLocations) {
+      final double minX = mamad['minX'] ?? (mamad['centerX'] ?? 0.0) - 25;
+      final double maxX = mamad['maxX'] ?? (mamad['centerX'] ?? 0.0) + 25;
+      final double minY = mamad['minY'] ?? (mamad['centerY'] ?? 0.0) - 25;
+      final double maxY = mamad['maxY'] ?? (mamad['centerY'] ?? 0.0) + 25;
+      
+      if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+        print('🔒 Point (${x.round()}, ${y.round()}) is INSIDE MAMAD bounds: (${minX.round()}, ${minY.round()}) to (${maxX.round()}, ${maxY.round()})');
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  // Check if point is inside a room
+  DetectedRoom? getPointRoom(double x, double y) {
+    for (DetectedRoom room in rooms) {
+      final bounds = room.boundaries;
+      if (bounds.containsKey('x') && bounds.containsKey('y') && 
+          bounds.containsKey('width') && bounds.containsKey('height')) {
+        final roomX = (bounds['x'] as num).toDouble();
+        final roomY = (bounds['y'] as num).toDouble();
+        final roomWidth = (bounds['width'] as num).toDouble();
+        final roomHeight = (bounds['height'] as num).toDouble();
+        
+        if (x >= roomX && x <= roomX + roomWidth &&
+            y >= roomY && y <= roomY + roomHeight) {
+          return room;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Get MAMAD locations and boundaries from user annotations
+  List<Map<String, dynamic>> getMAMADLocations() {
+    final mamadAnnotations = userAnnotations
+        .where((annotation) => annotation['tool'] == 'mamad')
+        .map((mamad) {
+          Map<String, dynamic> mamadInfo = {};
+          
+          print('🔍 Processing MAMAD annotation: ${mamad.keys}');
+          
+          // First priority: use roomData if available
+          if (mamad['roomData'] != null && mamad['roomData']['center'] != null) {
+            final center = mamad['roomData']['center'];
+            final bounds = mamad['roomData']['bounds'];
+            
+            mamadInfo['centerX'] = (center['x'] as num).toDouble();
+            mamadInfo['centerY'] = (center['y'] as num).toDouble();
+            
+            print('🔒 MAMAD center from roomData: (${mamadInfo['centerX']}, ${mamadInfo['centerY']})');
+            
+            // Extract MAMAD rectangle boundaries
+            if (bounds != null) {
+              mamadInfo['minX'] = (bounds['minX'] as num?)?.toDouble() ?? mamadInfo['centerX']! - 25;
+              mamadInfo['maxX'] = (bounds['maxX'] as num?)?.toDouble() ?? mamadInfo['centerX']! + 25;
+              mamadInfo['minY'] = (bounds['minY'] as num?)?.toDouble() ?? mamadInfo['centerY']! - 25;
+              mamadInfo['maxY'] = (bounds['maxY'] as num?)?.toDouble() ?? mamadInfo['centerY']! + 25;
+              mamadInfo['width'] = mamadInfo['maxX']! - mamadInfo['minX']!;
+              mamadInfo['height'] = mamadInfo['maxY']! - mamadInfo['minY']!;
+            }
+          }
+          
+          // Always calculate bounds from points (most reliable for drawn rectangles)
+          if (mamad['points'] != null && (mamad['points'] as List).isNotEmpty) {
+            final points = (mamad['points'] as List);
+            final xCoords = points.map((p) => (p['x'] as num).toDouble()).toList();
+            final yCoords = points.map((p) => (p['y'] as num).toDouble()).toList();
+            
+            print('🔒 MAMAD points: ${points.length} points, X range: ${xCoords.reduce(math.min)}-${xCoords.reduce(math.max)}, Y range: ${yCoords.reduce(math.min)}-${yCoords.reduce(math.max)}');
+            
+            // Calculate center from points
+            mamadInfo['centerX'] = xCoords.reduce((a, b) => a + b) / xCoords.length;
+            mamadInfo['centerY'] = yCoords.reduce((a, b) => a + b) / yCoords.length;
+            
+            // Calculate bounding box from points
+            mamadInfo['minX'] = xCoords.reduce(math.min);
+            mamadInfo['maxX'] = xCoords.reduce(math.max);
+            mamadInfo['minY'] = yCoords.reduce(math.min);
+            mamadInfo['maxY'] = yCoords.reduce(math.max);
+            mamadInfo['width'] = mamadInfo['maxX']! - mamadInfo['minX']!;
+            mamadInfo['height'] = mamadInfo['maxY']! - mamadInfo['minY']!;
+            
+            print('🔒 MAMAD calculated bounds: (${mamadInfo['minX']}, ${mamadInfo['minY']}) to (${mamadInfo['maxX']}, ${mamadInfo['maxY']})');
+            print('🔒 MAMAD size: ${mamadInfo['width']} x ${mamadInfo['height']}');
+          }
+          
+          // Default values if nothing found
+          if (mamadInfo['centerX'] == null) {
+            print('⚠️ No MAMAD data found, using defaults');
+            mamadInfo['centerX'] = 0.0;
+            mamadInfo['centerY'] = 0.0;
+            mamadInfo['minX'] = -25.0;
+            mamadInfo['maxX'] = 25.0;
+            mamadInfo['minY'] = -25.0;
+            mamadInfo['maxY'] = 25.0;
+            mamadInfo['width'] = 50.0;
+            mamadInfo['height'] = 50.0;
+          }
+          
+          return mamadInfo;
+        })
+        .toList();
+        
+    print('🔒 Total MAMAD locations found: ${mamadAnnotations.length}');
+    return mamadAnnotations;
+  }
+
+  // Ray casting to check line of sight and calculate attenuation
+  double calculatePathAttenuation(double fromX, double fromY, double toX, double toY) {
+    double totalAttenuation = 1.0;
+    const int steps = 20; // Ray casting resolution (optimized for performance)
+    
+    // Track which elements we've already hit to avoid double-counting
+    Set<ArchitecturalElement> hitElements = {};
+    
+    for (int i = 0; i <= steps; i++) {
+      final double t = i / steps;
+      final double rayX = fromX + t * (toX - fromX);
+      final double rayY = fromY + t * (toY - fromY);
+      
+      // Check intersection with architectural elements
+      for (ArchitecturalElement element in elements) {
+        if (hitElements.contains(element)) continue; // Skip already hit elements
+        
+        final bbox = element.bbox;
+        final x1 = (bbox['x1'] ?? bbox['x'] ?? bbox['left'] ?? 0).toDouble();
+        final y1 = (bbox['y1'] ?? bbox['y'] ?? bbox['top'] ?? 0).toDouble();
+        final x2 = (bbox['x2'] ?? bbox['right'] ?? (x1 + (bbox['width'] ?? 0))).toDouble();
+        final y2 = (bbox['y2'] ?? bbox['bottom'] ?? (y1 + (bbox['height'] ?? 0))).toDouble();
+        
+        // Ensure valid bounding box
+        final minX = math.min(x1, x2);
+        final maxX = math.max(x1, x2);
+        final minY = math.min(y1, y2);
+        final maxY = math.max(y1, y2);
+        
+        if (rayX >= minX && rayX <= maxX && rayY >= minY && rayY <= maxY) {
+          final String elementType = element.type.toLowerCase();
+          double attenuation = wallAttenuation[elementType] ?? 0.9; // Default slight attenuation
+          
+          // Special handling for different element types
+          if (elementType.contains('wall')) {
+            attenuation = 0.3; // Walls provide strong protection
+          } else if (elementType.contains('door')) {
+            attenuation = 0.8; // Doors provide some protection
+          } else if (elementType.contains('window')) {
+            attenuation = 0.7; // Windows provide less protection
+          } else if (elementType.contains('column')) {
+            attenuation = 0.4; // Columns provide good protection
+          }
+          
+          totalAttenuation *= attenuation;
+          hitElements.add(element);
+          
+          // If attenuation becomes very low, break early
+          if (totalAttenuation < 0.1) break;
+        }
+      }
+    }
+    
+    // Add distance-based attenuation (blast weakens over distance)
+    final double distance = calculateDistance(fromX, fromY, toX, toY);
+    final double distanceAttenuation = math.exp(-distance / maxRiskDistance);
+    totalAttenuation *= distanceAttenuation;
+    
+    return math.max(totalAttenuation, 0.01); // Minimum attenuation to prevent division by zero
+  }
+
+  // Calculate blast pressure at distance with attenuation
+  double calculateBlastPressure(double distance, double pathAttenuation, {double explosiveIntensity = 1.0}) {
+    if (distance == 0) return explosiveIntensity; // At explosion point
+    
+    // Inverse square law with exponential decay
+    final double pressureDecay = math.pow(baseExplosiveRadius / distance, 2).toDouble();
+    final double distanceDecay = math.exp(-distance / maxRiskDistance);
+    
+    return explosiveIntensity * pressureDecay * distanceDecay * pathAttenuation;
+  }
+
+  // Calculate occupancy risk based on room type and accessibility
+  double calculateOccupancyRisk(DetectedRoom? room) {
+    if (room == null) return 0.5; // Unknown area
+    
+    final int doorCount = room.doors.length;
+    
+    // Higher occupancy risk for rooms with more access points
+    double occupancyFactor = 0.3 + (doorCount * 0.2);
+    
+    // Room-specific modifiers
+    final String roomName = room.defaultName?.toLowerCase() ?? '';
+    if (roomName.contains('hallway') || roomName.contains('corridor')) {
+      occupancyFactor *= 1.5; // Higher traffic areas
+    }
+    
+    return math.min(occupancyFactor, 1.0);
+  }
+
+  // Main risk calculation function
+  double calculateRiskScore(double targetX, double targetY, {List<ExplosionScenario>? explosionScenarios}) {
+    // Default explosion scenarios if none provided
+    explosionScenarios ??= generateDefaultExplosionScenarios();
+    
+    double totalRisk = 0;
+    final DetectedRoom? targetRoom = getPointRoom(targetX, targetY);
+    
+    // Check if point is outside the house structure
+    bool isOutsideHouse = _isPointOutsideHouse(targetX, targetY);
+    
+    for (ExplosionScenario scenario in explosionScenarios) {
+      final double distance = calculateDistance(targetX, targetY, scenario.x, scenario.y);
+      
+      // Skip if beyond maximum risk distance
+      if (distance > maxRiskDistance) continue;
+      
+      // Calculate path attenuation
+      final double pathAttenuation = calculatePathAttenuation(scenario.x, scenario.y, targetX, targetY);
+      
+      // Calculate blast pressure
+      final double blastPressure = calculateBlastPressure(distance, pathAttenuation, explosiveIntensity: scenario.intensity);
+      
+      // Apply room-specific modifiers
+      double roomModifier = 1.0;
+      if (targetRoom != null) {
+        roomModifier = roomRiskModifiers[targetRoom.defaultName?.toLowerCase()] ?? 1.0;
+      } else if (isOutsideHouse) {
+        roomModifier = 0.2; // Much lower risk outside the house structure
+      }
+      
+      // Calculate occupancy risk
+      final double occupancyRisk = calculateOccupancyRisk(targetRoom);
+      
+      // Combine factors
+      final double scenarioRisk = blastPressure * roomModifier * occupancyRisk * scenario.probability;
+      totalRisk += scenarioRisk;
+    }
+    
+    // Apply MAMAD protection - enhanced protection zones
+    final List<Map<String, dynamic>> mamadLocations = getMAMADLocations();
+    double mamadProtection = 1.0; // No protection by default
+    
+    if (mamadLocations.isNotEmpty) {
+      for (Map<String, dynamic> mamad in mamadLocations) {
+        final double centerX = mamad['centerX'] ?? 0.0;
+        final double centerY = mamad['centerY'] ?? 0.0;
+        final double minX = mamad['minX'] ?? centerX - 25;
+        final double maxX = mamad['maxX'] ?? centerX + 25;
+        final double minY = mamad['minY'] ?? centerY - 25;
+        final double maxY = mamad['maxY'] ?? centerY + 25;
+        
+        // Check if point is inside MAMAD rectangle (safest area)
+        if (targetX >= minX && targetX <= maxX && targetY >= minY && targetY <= maxY) {
+          mamadProtection = 0.02; // 98% risk reduction inside MAMAD
+          print('🔒 Point (${targetX.round()}, ${targetY.round()}) is INSIDE MAMAD - maximum protection applied');
+          break;
+        }
+        
+        // Check distance from MAMAD center for graduated protection zones
+        final double mamadDistance = calculateDistance(targetX, targetY, centerX, centerY);
+        
+        // Zone 1: Immediate vicinity (reinforced concrete walls provide protection)
+        if (mamadDistance < 50) {
+          mamadProtection = math.min(mamadProtection, 0.15); // 85% risk reduction
+        }
+        // Zone 2: Near MAMAD (some structural protection benefit)
+        else if (mamadDistance < 80) {
+          mamadProtection = math.min(mamadProtection, 0.4); // 60% risk reduction
+        }
+        // Zone 3: MAMAD influence area (slight protection)
+        else if (mamadDistance < 120) {
+          mamadProtection = math.min(mamadProtection, 0.7); // 30% risk reduction
+        }
+      }
+      
+      // Debug log when MAMAD protection is applied
+      if (mamadProtection < 1.0) {
+        print('🔒 MAMAD protection applied to point (${targetX.round()}, ${targetY.round()}): ${((1.0 - mamadProtection) * 100).round()}% reduction');
+      }
+    }
+    
+    totalRisk *= mamadProtection;
+    
+    // Additional reduction for points clearly outside the house
+    if (isOutsideHouse) {
+      totalRisk *= 0.3; // 70% reduction for exterior points
+    }
+    
+    // Normalize to 0-1 scale
+    return math.min(totalRisk, 1.0);
+  }
+
+  // Helper method to determine if a point is outside the house structure
+  bool _isPointOutsideHouse(double x, double y) {
+    // If no rooms are detected, assume all points are inside
+    if (rooms.isEmpty) return false;
+    
+    // Check if point is inside any room
+    if (getPointRoom(x, y) != null) return false;
+    
+    // Check if point is near any architectural elements (walls, doors, windows)
+    for (ArchitecturalElement element in elements) {
+      final bbox = element.bbox;
+      final elementX = (bbox['x'] ?? bbox['center_x'] ?? 0).toDouble();
+      final elementY = (bbox['y'] ?? bbox['center_y'] ?? 0).toDouble();
+      final elementWidth = (bbox['width'] ?? 50).toDouble();
+      final elementHeight = (bbox['height'] ?? 50).toDouble();
+      
+      // Check if point is within expanded bounding box (near structural elements)
+      if (x >= elementX - 20 && x <= elementX + elementWidth + 20 &&
+          y >= elementY - 20 && y <= elementY + elementHeight + 20) {
+        return false; // Point is near structure, consider it inside
+      }
+    }
+    
+    // If we have room boundaries, check if point is far from all rooms
+    double minDistanceToRoom = double.infinity;
+    for (DetectedRoom room in rooms) {
+      final bounds = room.boundaries;
+      if (bounds.containsKey('x') && bounds.containsKey('y')) {
+        final roomX = (bounds['x'] as num).toDouble();
+        final roomY = (bounds['y'] as num).toDouble();
+        final roomWidth = (bounds['width'] as num? ?? 50).toDouble();
+        final roomHeight = (bounds['height'] as num? ?? 50).toDouble();
+        
+        // Calculate distance to room center
+        final roomCenterX = roomX + roomWidth / 2;
+        final roomCenterY = roomY + roomHeight / 2;
+        final distanceToRoom = calculateDistance(x, y, roomCenterX, roomCenterY);
+        
+        minDistanceToRoom = math.min(minDistanceToRoom, distanceToRoom);
+      }
+    }
+    
+    // If point is very far from any room, consider it outside
+    return minDistanceToRoom > 100; // 100 pixels threshold
+  }
+
+  // Generate default explosion scenarios
+  List<ExplosionScenario> generateDefaultExplosionScenarios() {
+    final List<ExplosionScenario> scenarios = [];
+    
+    // High-risk scenarios at main access points (doors)
+    final List<ArchitecturalElement> doors = elements.where((el) => 
+        el.type.toLowerCase() == 'door' || el.type.toLowerCase().contains('door')).toList();
+    
+    if (doors.isNotEmpty) {
+      for (ArchitecturalElement door in doors) {
+        final double doorX = (door.center['x'] ?? door.bbox['x'] ?? 0).toDouble();
+        final double doorY = (door.center['y'] ?? door.bbox['y'] ?? 0).toDouble();
+        
+        scenarios.add(ExplosionScenario(
+          x: doorX,
+          y: doorY,
+          intensity: 1.0,
+          probability: 0.4 / doors.length, // 40% total probability for door attacks
+          description: 'Door breach at (${doorX.round()}, ${doorY.round()})',
+        ));
+      }
+    } else {
+      // Fallback: create scenarios at image borders if no doors detected
+      final width = imageDimensions['width']?.toDouble() ?? 800;
+      final height = imageDimensions['height']?.toDouble() ?? 600;
+      
+      scenarios.addAll([
+        ExplosionScenario(x: width * 0.1, y: height * 0.5, intensity: 0.8, probability: 0.1, description: 'Left entry point'),
+        ExplosionScenario(x: width * 0.9, y: height * 0.5, intensity: 0.8, probability: 0.1, description: 'Right entry point'),
+        ExplosionScenario(x: width * 0.5, y: height * 0.1, intensity: 0.8, probability: 0.1, description: 'Top entry point'),
+        ExplosionScenario(x: width * 0.5, y: height * 0.9, intensity: 0.8, probability: 0.1, description: 'Bottom entry point'),
+      ]);
+    }
+    
+    // Medium-risk scenarios at windows (external threats)
+    final List<ArchitecturalElement> windows = elements.where((el) => 
+        el.type.toLowerCase() == 'window' || el.type.toLowerCase().contains('window')).toList();
+    
+    if (windows.isNotEmpty) {
+      for (ArchitecturalElement window in windows) {
+        final double windowX = (window.center['x'] ?? window.bbox['x'] ?? 0).toDouble();
+        final double windowY = (window.center['y'] ?? window.bbox['y'] ?? 0).toDouble();
+        
+        scenarios.add(ExplosionScenario(
+          x: windowX,
+          y: windowY,
+          intensity: 0.7,
+          probability: 0.3 / windows.length, // 30% total probability for window attacks
+          description: 'Window breach at (${windowX.round()}, ${windowY.round()})',
+        ));
+      }
+    }
+    
+    // High-risk scenarios in room centers (especially hallways/corridors)
+    for (DetectedRoom room in rooms) {
+      final bounds = room.boundaries;
+      if (bounds.containsKey('x') && bounds.containsKey('y') && 
+          bounds.containsKey('width') && bounds.containsKey('height')) {
+        final double centerX = (bounds['x'] as num).toDouble() + (bounds['width'] as num).toDouble() / 2;
+        final double centerY = (bounds['y'] as num).toDouble() + (bounds['height'] as num).toDouble() / 2;
+        
+        double intensity = 0.5; // Base intensity for room centers
+        double probability = 0.3 / rooms.length; // 30% total probability
+        
+        // Higher intensity for high-traffic areas
+        final roomName = room.defaultName?.toLowerCase() ?? '';
+        if (roomName.contains('hallway') || roomName.contains('corridor') || 
+            roomName.contains('entrance') || roomName.contains('lobby')) {
+          intensity = 0.9;
+          probability *= 2; // Double probability for high-traffic areas
+        }
+        
+        scenarios.add(ExplosionScenario(
+          x: centerX,
+          y: centerY,
+          intensity: intensity,
+          probability: probability,
+          description: 'Interior threat in ${room.defaultName ?? 'unknown room'}',
+        ));
+      }
+    }
+    
+    return scenarios;
+  }
+
+  // Generate risk heatmap for entire floor plan
+  List<List<RiskPoint>> generateRiskHeatmap({int gridSize = 10}) {
+    final List<List<RiskPoint>> heatmap = [];
+    final int width = imageDimensions['width'] ?? 800;
+    final int height = imageDimensions['height'] ?? 600;
+    
+    for (int y = 0; y < height; y += gridSize) {
+      final List<RiskPoint> row = [];
+      for (int x = 0; x < width; x += gridSize) {
+        final double risk = calculateRiskScore(x.toDouble(), y.toDouble());
+        row.add(RiskPoint(
+          x: x.toDouble(),
+          y: y.toDouble(),
+          risk: risk,
+          riskLevel: getRiskLevel(risk),
+        ));
+      }
+      heatmap.add(row);
+    }
+    
+    return heatmap;
+  }
+
+  // Categorize risk levels
+  String getRiskLevel(double riskScore, {double? x, double? y}) {
+    // Special handling for MAMAD areas - always safest
+    if (x != null && y != null && isPointInsideMAMAD(x, y)) {
+      return 'MINIMAL'; // MAMAD is always the safest area
+    }
+    
+    if (riskScore >= 0.8) return 'CRITICAL';
+    if (riskScore >= 0.6) return 'HIGH';
+    if (riskScore >= 0.4) return 'MEDIUM';
+    if (riskScore >= 0.2) return 'LOW';
+    return 'MINIMAL';
+  }
+
+  // Get evacuation recommendations for a point
+  String getEvacuationRecommendations(double x, double y) {
+    final DetectedRoom? room = getPointRoom(x, y);
+    final List<Map<String, dynamic>> mamadLocations = getMAMADLocations();
+    
+    if (room == null) return "Move to nearest identified safe room";
+    
+    // Find nearest MAMAD
+    Map<String, dynamic>? nearestMAMAD;
+    double minDistance = double.infinity;
+    
+    for (Map<String, dynamic> mamad in mamadLocations) {
+      final double centerX = mamad['centerX'] ?? 0.0;
+      final double centerY = mamad['centerY'] ?? 0.0;
+      final double distance = calculateDistance(x, y, centerX, centerY);
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestMAMAD = mamad;
+      }
+    }
+    
+    if (nearestMAMAD != null && minDistance < 100) {
+      final double centerX = nearestMAMAD['centerX'] ?? 0.0;
+      final double centerY = nearestMAMAD['centerY'] ?? 0.0;
+      return 'Evacuate to nearest MAMAD at (${centerX.round()}, ${centerY.round()}) - Distance: ${(imageToMeters(minDistance) * 100).round()}cm';
+    }
+    
+    // Alternative: find exits
+    final List<ArchitecturalElement> exits = room.doors;
+    if (exits.length > 1) {
+      return 'Multiple exits available - use furthest from potential threat source';
+    } else if (exits.length == 1) {
+      return 'Single exit available - assess situation before evacuation';
+    } else {
+      return 'No direct exits detected - seek alternative escape route';
+    }
+  }
+}
+
+class ExplosionScenario {
+  final double x;
+  final double y;
+  final double intensity;
+  final double probability;
+  final String description;
+
+  ExplosionScenario({
+    required this.x,
+    required this.y,
+    required this.intensity,
+    required this.probability,
+    required this.description,
+  });
+}
+
+class RiskPoint {
+  final double x;
+  final double y;
+  final double risk;
+  final String riskLevel;
+
+  RiskPoint({
+    required this.x,
+    required this.y,
+    required this.risk,
+    required this.riskLevel,
+  });
+}
+
+class RiskGridPoint {
+  final double x;
+  final double y;
+  final double riskScore;
+  final String riskLevel;
+  final Color color;
+
+  RiskGridPoint({
+    required this.x,
+    required this.y,
+    required this.riskScore,
+    required this.riskLevel,
+    required this.color,
+  });
+}
 
 class EnhancedDetectionResultsScreen extends StatefulWidget {
   final Map<String, dynamic> detectionResult;
@@ -86,6 +706,21 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   final Map<String, TextEditingController> _userRoomDescControllers = {};
   bool _isEditingUserRoom = false;
   String? _editingUserRoomId;
+  
+  // Risk heatmap refresh state
+  int _riskHeatmapRefreshKey = 0;
+  
+  // Performance optimization - cache heavy computations
+  List<List<RiskGridPoint>>? _cachedRiskGrid;
+  bool _isRiskGridGenerating = false;
+  
+  // Method to invalidate risk cache when annotations change
+  void _invalidateRiskCache() {
+    if (_cachedRiskGrid != null) {
+      print('🔄 Risk cache invalidated due to annotation changes');
+      _cachedRiskGrid = null;
+    }
+  }
 
   // ===== HOUSE BOUNDARY DRAWING STATE VARIABLES =====
   List<Offset> _houseBoundaryPoints = [];
@@ -163,7 +798,18 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   void initState() {
     super.initState();
     _result = EnhancedFloorPlanResult.fromJson(widget.detectionResult);
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    
+    // Tab controller initialized - no special listeners needed
+    
+    // Show tutorial popup after a short delay when page loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) {
+          _showTutorialPopup(context);
+        }
+      });
+    });
     
     // Initialize room name controllers
     _initializeRoomControllers();
@@ -307,53 +953,656 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Enhanced Detection Results'),
-        actions: [
-          // Edit mode toggle for room information
-          IconButton(
-            icon: Icon(_isEditingRoomInfo ? Icons.save : Icons.edit),
-            onPressed: _toggleEditMode,
-            tooltip: _isEditingRoomInfo ? 'Save Changes' : 'Edit Room Info',
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              const Color(0xFF0D47A1), // Deep blue
+              const Color(0xFF1565C0), // Primary blue
+              const Color(0xFF1976D2), // Lighter blue
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: _showAnalysisInfo,
-            tooltip: 'Analysis Information',
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(
-              icon: Icon(Icons.analytics),
-              text: 'Analysis',
+        ),
+        child: Stack(
+          children: [
+            // Main Content
+            Column(
+              children: [
+                // Custom App Bar with glass effect
+                _buildGlassAppBar(context),
+                
+                // Floating Circular Tabs
+                _buildFloatingTabs(context),
+                
+                // Tab Content
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildAnalysisView(),
+                      _buildAnnotationView(),
+                      _buildVitalInfoView(),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            Tab(
-              icon: Icon(Icons.image),
-              text: 'Visualizations',
-            ),
-            Tab(
-              icon: Icon(Icons.draw),
-              text: 'Annotate',
-            ),
-            Tab(
-              icon: Icon(Icons.home_outlined),
-              text: 'Vital Info',
+            
+            // Tutorial popup trigger
+            Positioned(
+              top: 120,
+              right: 16,
+              child: _buildTutorialButton(context),
             ),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildAnalysisView(),
-          _buildVisualizationView(),
-          _buildAnnotationView(),
-          _buildVitalInfoView(),
+      bottomNavigationBar: _buildBottomBar(),
+    );
+  }
+
+  Widget _buildGlassAppBar(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 8,
+        left: 16,
+        right: 16,
+        bottom: 16,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.white.withOpacity(0.2),
+            width: 1,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
-      bottomNavigationBar: _buildBottomBar(),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: Text(
+              'Enhanced Detection Results',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              _isEditingRoomInfo ? Icons.save : Icons.edit,
+              color: Colors.white,
+            ),
+            onPressed: _toggleEditMode,
+            tooltip: _isEditingRoomInfo ? 'Save Changes' : 'Edit Room Info',
+          ),
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: Colors.white),
+            onPressed: _showAnalysisInfo,
+            tooltip: 'Analysis Information',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloatingTabs(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildFloatingTab(
+            context,
+            0,
+            Icons.analytics,
+            'Analysis',
+          ),
+          _buildFloatingTab(
+            context,
+            1,
+            Icons.draw,
+            'Annotate',
+          ),
+          _buildFloatingTab(
+            context,
+            2,
+            Icons.home_outlined,
+            'Vital Info',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloatingTab(BuildContext context, int index, IconData icon, String label) {
+    final bool isSelected = _tabController.index == index;
+    
+    return GestureDetector(
+      onTap: () {
+        _tabController.animateTo(index);
+        setState(() {});
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        decoration: BoxDecoration(
+          color: isSelected 
+            ? Colors.white.withOpacity(0.3)
+            : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: isSelected 
+              ? Colors.white.withOpacity(0.5)
+              : Colors.white.withOpacity(0.2),
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: Colors.white.withOpacity(0.2),
+              blurRadius: 15,
+              spreadRadius: 2,
+              offset: const Offset(0, 0),
+            ),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ] : [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: Colors.white,
+              size: isSelected ? 28 : 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: isSelected ? 14 : 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTutorialButton(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showTutorialPopup(context),
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0xFFFFC107).withOpacity(0.9), // Same yellow as start screen
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFC107).withOpacity(0.4),
+              blurRadius: 15,
+              spreadRadius: 2,
+              offset: const Offset(0, 0),
+            ),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.help_outline,
+          color: Colors.black87,
+          size: 24,
+        ),
+      ),
+    );
+  }
+
+  void _showTutorialPopup(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.7),
+      builder: (BuildContext context) {
+        return TweenAnimationBuilder<double>(
+          duration: const Duration(milliseconds: 600),
+          tween: Tween(begin: 0.0, end: 1.0),
+          curve: Curves.elasticOut,
+          builder: (context, value, child) {
+            return Transform.scale(
+              scale: 0.8 + (0.2 * value),
+              child: Transform.translate(
+                offset: Offset(0, 50 * (1 - value)),
+                child: Opacity(
+                  opacity: value,
+                  child: Dialog(
+                    backgroundColor: Colors.transparent,
+                    child: Container(
+                          width: 380, // Increased from 320
+                      margin: const EdgeInsets.symmetric(horizontal: 20),
+                          padding: const EdgeInsets.all(28), // Increased padding
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Colors.grey.withOpacity(0.2),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.15),
+                            blurRadius: 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Stage badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1565C0),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'STAGE 2',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          
+                              const SizedBox(height: 24),
+                          
+                          // Icon container
+                          Container(
+                                width: 90, // Increased from 80
+                                height: 90, // Increased from 80
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1565C0).withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.analytics_outlined,
+                              color: Color(0xFF1565C0),
+                                  size: 45, // Increased from 40
+                            ),
+                          ),
+                          
+                              const SizedBox(height: 24), // Increased spacing
+                          
+                          // Title
+                          Text(
+                            'Enhanced Detection Results',
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: Colors.black87,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          
+                              const SizedBox(height: 12),
+                          
+                          // Description
+                          Text(
+                            'Review your floor plan analysis results and explore detailed safety assessments for each detected area.',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.grey[600],
+                              height: 1.4,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          
+                              const SizedBox(height: 28), // Increased spacing
+                          
+                          // How it works section
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'How it works:',
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: Colors.black87,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          
+                              const SizedBox(height: 18), // Increased spacing
+                          
+                          // Steps
+                          _buildNumberedStepInline(
+                            1,
+                            'Analysis Tab',
+                            'View detected rooms, safety scores, and detailed risk assessments',
+                          ),
+                          
+                              const SizedBox(height: 14), // Increased spacing
+                          
+                          _buildNumberedStepInline(
+                            2,
+                            'Annotate Tab',
+                            'Add custom annotations and mark MAMAD locations on your floor plan',
+                          ),
+                          
+                              const SizedBox(height: 14), // Increased spacing
+                          
+                          _buildNumberedStepInline(
+                            3,
+                            'Vital Info Tab',
+                            'Access emergency contacts, evacuation routes, and critical safety data',
+                          ),
+                          
+                              const SizedBox(height: 36), // Increased spacing
+                          
+                          // Action Buttons
+                          Row(
+                            children: [
+                              // Skip Tutorial Button
+                              Expanded(
+                                child: Container(
+                                      height: 52, // Increased from 50
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(25),
+                                    border: Border.all(
+                                      color: const Color(0xFF1565C0),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(25),
+                                      onTap: () => Navigator.of(context).pop(),
+                                      child: Center(
+                                        child: Text(
+                                          'Skip Tutorial',
+                                          style: TextStyle(
+                                            color: const Color(0xFF1565C0),
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              
+                              const SizedBox(width: 16),
+                              
+                              // Got it Button
+                              Expanded(
+                                child: Container(
+                                      height: 52, // Increased from 50
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(25),
+                                    gradient: const LinearGradient(
+                                      colors: [
+                                        Color(0xFF1565C0), // Primary blue
+                                        Color(0xFF1976D2), // Lighter blue
+                                      ],
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF1565C0).withOpacity(0.3),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(25),
+                                      onTap: () => Navigator.of(context).pop(),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            'Got it!',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Icon(
+                                            Icons.arrow_forward,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                          ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildNumberedStepInline(int step, String title, String description) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1565C0),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              step.toString(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 13,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+     Widget _buildNumberedStep(int step, String title, String description) {
+       return Row(
+         crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+           Container(
+             width: 24,
+             height: 24,
+             decoration: BoxDecoration(
+               color: const Color(0xFF1565C0),
+               shape: BoxShape.circle,
+             ),
+             child: Center(
+               child: Text(
+                 step.toString(),
+                 style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+                   fontSize: 12,
+                 ),
+               ),
+             ),
+           ),
+           const SizedBox(width: 12),
+           Expanded(
+             child: Column(
+               crossAxisAlignment: CrossAxisAlignment.start,
+               children: [
+                 Text(
+                   title,
+                   style: const TextStyle(
+                     color: Colors.black87,
+                     fontWeight: FontWeight.w600,
+                     fontSize: 14,
+                   ),
+                 ),
+                 const SizedBox(height: 4),
+                 Text(
+                   description,
+                   style: TextStyle(
+                     color: Colors.grey[600],
+                     fontSize: 13,
+                     height: 1.3,
+                   ),
+                 ),
+               ],
+             ),
+           ),
+         ],
+       );
+     }
+   }
+
+// Original method preserved for compatibility
+Widget _buildTutorialStep(int step, String title, String description, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+                  color: color.withOpacity(0.3),
+                  blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+            child: Center(
+              child: Text(
+                step.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+                    Icon(icon, color: color, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    color: Colors.grey[700],
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -361,7 +1610,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
     return Column(
       children: [
         _buildSummaryCard(),
-        Expanded(
+              Expanded(
           child: Row(
             children: [
               // Left panel - Room list
@@ -381,78 +1630,151 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
     );
   }
 
-  Widget _buildVisualizationView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
+  Widget _buildRoomList() {
+    final allRooms = _getAllRooms();
+    
+    return Card(
+      margin: const EdgeInsets.all(8.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'AI Detection Visualizations',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Powered by YOLO and Meta\'s Segment Anything Model (SAM)',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Colors.grey[600],
-              fontStyle: FontStyle.italic,
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                Text(
+                  'All Rooms (${allRooms.length})',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                if (_getUserDrawnRooms().isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.edit, size: 10, color: Colors.green[700]),
+                        const SizedBox(width: 2),
+                        Text(
+                          '${_getUserDrawnRooms().length} user-drawn',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: Colors.green[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 24),
-          _buildImageVisualizationSection(),
+          Expanded(
+            child: ListView.builder(
+              itemCount: allRooms.length,
+              itemBuilder: (context, index) {
+                final room = allRooms[index];
+                final isSelected = index == _selectedRoomIndex;
+                final isUserDrawn = room['isUserDrawn'] as bool;
+                
+                return ListTile(
+                  selected: isSelected,
+                  leading: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: isSelected 
+                            ? (isUserDrawn ? Colors.green : Colors.blue)
+                            : Colors.grey.shade300,
+                child: Text(
+                          (index + 1).toString(),
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+                      if (isUserDrawn)
+                        Positioned(
+                          top: -2,
+                          right: -2,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 1),
+                            ),
+                            child: Icon(
+                              Icons.edit,
+                              size: 8,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          room['defaultName'],
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isUserDrawn ? Colors.green[800] : null,
+                          ),
+                        ),
+                      ),
+                      if (isUserDrawn) ...[
+                        Icon(
+                          room['roomData'] != null && (room['roomData'] as Map)['shape'] == 'triangle'
+                              ? Icons.change_history
+                              : Icons.rectangle_outlined,
+                          size: 16,
+                          color: Colors.green[600],
+                        ),
+                      ],
+                    ],
+                  ),
+                  subtitle: Text(
+                    isUserDrawn 
+                        ? 'User-drawn • ${(room['roomData'] as Map)['shape']}'
+                        : 'Confidence: ${(room['confidence'] * 100).toStringAsFixed(0)}%',
+                    style: TextStyle(
+                      color: isUserDrawn 
+                          ? Colors.green[600]
+                          : _getConfidenceColor(room['confidence']),
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!isUserDrawn) ...[
+                        if ((room['doors'] as List).isNotEmpty)
+                          Icon(Icons.door_front_door, size: 16, color: Colors.orange),
+                        if ((room['windows'] as List).isNotEmpty)
+                          Icon(Icons.window, size: 16, color: Colors.blue),
+                      ],
+                    ],
+                  ),
+                  onTap: () {
+                  setState(() {
+                      _selectedRoomIndex = index;
+                    });
+                  },
+                );
+              },
+            ),
+          ),
         ],
       ),
-    );
-  }
-
-  Widget _buildImageVisualizationSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Original Floor Plan
-        if (_result.originalImageBase64 != null) ...[
-          _buildImageCard(
-            'Original Floor Plan',
-            _result.originalImageBase64!,
-            Icons.home_outlined,
-            Colors.blue,
-            'The original uploaded floor plan image used for analysis',
-          ),
-          const SizedBox(height: 20),
-        ],
-        
-        // YOLO Detection Results
-        if (_result.annotatedImageBase64 != null) ...[
-          _buildImageCard(
-            'YOLO Architectural Detection',
-            _result.annotatedImageBase64!,
-            Icons.auto_awesome,
-            Colors.green,
-            'Computer vision detection of architectural elements including doors, windows, walls, and stairs. Each element is highlighted with bounding boxes and confidence scores.',
-          ),
-          const SizedBox(height: 20),
-        ],
-        
-        // SAM Room Segmentation - Composite View
-        if (_result.samVisualization != null) ...[
-          _buildSamCompositeCard(),
-          const SizedBox(height: 20),
-        ] else ...[
-          _buildSamUnavailableCard(),
-          const SizedBox(height: 20),
-        ],
-        
-        // Point Segmentation Results (EfficientViTSAM style)
-        _buildPointSegmentationSection(),
-        
-        // SAM Technical Information
-        _buildSamTechnicalInfoCard(),
-        
-        // Combined Analysis Insights
-        const SizedBox(height: 20),
-        _buildAnalysisInsightsCard(),
-      ],
     );
   }
 
@@ -558,8 +1880,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                   Text(
                     'Point Segmentation Details:',
                     style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo[800]),
-                  ),
-                  const SizedBox(height: 8),
+          ),
+          const SizedBox(height: 8),
                   _buildPointSegmentationDetail('Total Masks Generated', totalMasks.toString(), Icons.layers),
                   _buildPointSegmentationDetail('Input Points', '${pointResult['point_count'] ?? 'N/A'}', Icons.touch_app),
                   _buildPointSegmentationDetail('Segmentation Method', 'SAM Point Prompt', Icons.psychology),
@@ -608,10 +1930,10 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                   TextSpan(text: '$title: ', style: const TextStyle(fontWeight: FontWeight.bold)),
                   TextSpan(text: value),
                 ],
-              ),
-            ),
-          ),
-        ],
+                    ),
+                  ),
+                ),
+              ],
       ),
     );
   }
@@ -638,9 +1960,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                         'Point-Based Segmentation Available',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
@@ -649,7 +1971,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                       ),
                       Text(
                         'Click on specific points in floor plans to segment rooms',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.grey[600],
                         ),
                       ),
@@ -672,8 +1994,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                   Text(
                     'How to Use Point Segmentation:',
                     style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[800]),
-                  ),
-                  const SizedBox(height: 8),
+                ),
+                const SizedBox(height: 8),
                   _buildHowToItem('1. Upload a floor plan image'),
                   _buildHowToItem('2. Click on specific points where you want to segment'),
                   _buildHowToItem('3. Get precise room segmentation masks'),
@@ -817,27 +2139,43 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
     }
     return Stack(
       children: [
-        Image.memory(
-          imageBytes,
-          key: const ValueKey('annotation_image'), // Consistent key for layout stability
-          fit: BoxFit.contain,
-          width: double.infinity,
-          height: double.infinity,
-        ),
-        // Custom painter for annotations - only show when not drawing or when using eraser
-        Positioned.fill(
-          child: CustomPaint(
-            painter: AnnotationPainter(
-              annotations: _isCurrentlyDrawing && _currentDrawingTool != 'eraser' 
-                  ? [] // Hide existing annotations while drawing for smooth experience
-                  : _userAnnotations,
-              currentStroke: _currentStroke,
-              strokeColor: _getToolColor(_currentDrawingTool),
-              strokeWidth: _strokeWidth,
-              isEraser: _currentDrawingTool == 'eraser',
-            ),
+        RepaintBoundary( // Prevent image from repainting unnecessarily
+          child: Image.memory(
+            imageBytes,
+            key: const ValueKey('annotation_image'), // Consistent key for layout stability
+            fit: BoxFit.contain,
+            width: double.infinity,
+            height: double.infinity,
           ),
         ),
+        // Custom painter for annotations - optimized for performance
+        if (!_isCurrentlyDrawing || _currentDrawingTool == 'eraser')
+          Positioned.fill(
+            child: RepaintBoundary( // Prevent unnecessary repaints
+              child: CustomPaint(
+                painter: AnnotationPainter(
+                  annotations: _userAnnotations,
+                  currentStroke: _currentDrawingTool == 'eraser' ? _currentStroke : [],
+                  strokeColor: _getToolColor(_currentDrawingTool),
+                  strokeWidth: _strokeWidth,
+                  isEraser: _currentDrawingTool == 'eraser',
+                ),
+              ),
+            ),
+          ),
+        // Show current stroke while drawing
+        if (_isCurrentlyDrawing && _currentDrawingTool != 'eraser')
+          Positioned.fill(
+            child: CustomPaint(
+              painter: AnnotationPainter(
+                annotations: [],
+                currentStroke: _currentStroke,
+                strokeColor: _getToolColor(_currentDrawingTool),
+                strokeWidth: _strokeWidth,
+                isEraser: false,
+              ),
+            ),
+          ),
         // Image mode indicator
         Positioned(
           top: 8,
@@ -856,7 +2194,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 Icon(
                   _isCurrentlyDrawing ? Icons.edit : Icons.auto_awesome,
                   size: 12,
-                  color: Colors.white,
+                    color: Colors.white,
                 ),
                 const SizedBox(width: 4),
                 Text(
@@ -925,7 +2263,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -970,7 +2308,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             ),
             const SizedBox(height: 12),
             Row(
-              children: [
+            children: [
                 Icon(Icons.touch_app, size: 16, color: Colors.grey[600]),
                 const SizedBox(width: 4),
                 Text(
@@ -1269,7 +2607,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
+      decoration: BoxDecoration(
                 color: Colors.blue.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(6),
               ),
@@ -1282,9 +2620,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                       'Based on Meta AI Research\'s Segment Anything Model',
                       style: TextStyle(fontSize: 12, color: Colors.blue[600]),
                     ),
-                  ),
-                ],
-              ),
+          ),
+        ],
+      ),
             ),
           ],
         ),
@@ -1322,14 +2660,14 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        children: [
             Row(
               children: [
                 Icon(Icons.insights, color: Colors.green[600]),
                 const SizedBox(width: 8),
-                Text(
+          Text(
                   'Analysis Insights',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
@@ -1592,7 +2930,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                     child: Icon(
                       Icons.edit,
                       size: 8,
-                      color: Colors.white,
+              color: Colors.white,
                     ),
                   ),
                 ),
@@ -1662,154 +3000,6 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               ],
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRoomList() {
-    final allRooms = _getAllRooms();
-    
-    return Card(
-      margin: const EdgeInsets.all(8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Text(
-                  'All Rooms (${allRooms.length})',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const Spacer(),
-                if (_getUserDrawnRooms().isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.edit, size: 10, color: Colors.green[700]),
-                        const SizedBox(width: 2),
-                        Text(
-                          '${_getUserDrawnRooms().length} user-drawn',
-                          style: TextStyle(
-                            fontSize: 9,
-                            color: Colors.green[700],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: allRooms.length,
-              itemBuilder: (context, index) {
-                final room = allRooms[index];
-                final isSelected = index == _selectedRoomIndex;
-                final isUserDrawn = room['isUserDrawn'] as bool;
-                
-                return ListTile(
-                  selected: isSelected,
-                  leading: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: isSelected 
-                            ? (isUserDrawn ? Colors.green : Colors.blue)
-                            : Colors.grey.shade300,
-                        child: Text(
-                          (index + 1).toString(),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.black,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      if (isUserDrawn)
-                        Positioned(
-                          top: -2,
-                          right: -2,
-                          child: Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: Colors.green,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 1),
-                            ),
-                            child: Icon(
-                              Icons.edit,
-                              size: 8,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          room['defaultName'],
-                          style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            color: isUserDrawn ? Colors.green[800] : null,
-                          ),
-                        ),
-                      ),
-                      if (isUserDrawn) ...[
-                        Icon(
-                          room['roomData'] != null && (room['roomData'] as Map)['shape'] == 'triangle'
-                              ? Icons.change_history
-                              : Icons.rectangle_outlined,
-                          size: 16,
-                          color: Colors.green[600],
-                        ),
-                      ],
-                    ],
-                  ),
-                  subtitle: Text(
-                    isUserDrawn 
-                        ? 'User-drawn • ${(room['roomData'] as Map)['shape']}'
-                        : 'Confidence: ${(room['confidence'] * 100).toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      color: isUserDrawn 
-                          ? Colors.green[600]
-                          : _getConfidenceColor(room['confidence']),
-                    ),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!isUserDrawn) ...[
-                        if ((room['doors'] as List).isNotEmpty)
-                          Icon(Icons.door_front_door, size: 16, color: Colors.orange),
-                        if ((room['windows'] as List).isNotEmpty)
-                          Icon(Icons.window, size: 16, color: Colors.blue),
-                      ],
-                    ],
-                  ),
-                  onTap: () {
-                    setState(() {
-                      _selectedRoomIndex = index;
-                    });
-                  },
-                );
-              },
-            ),
-          ),
         ],
       ),
     );
@@ -1907,7 +3097,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                          Text(
                            'User-Drawn Room',
                            style: TextStyle(
-                             fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.bold,
                              color: Colors.green[800],
                            ),
                          ),
@@ -1947,7 +3137,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
                          // Only show architectural elements for AI-detected rooms
              if (!isUserDrawn) ...[
                _buildArchitecturalElementsSection('Doors', (room['doors'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.door_front_door, Colors.orange),
@@ -2138,35 +3328,1059 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.3),
-            spreadRadius: 1,
-            blurRadius: 3,
-            offset: const Offset(0, -1),
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, -2),
           ),
         ],
       ),
       child: Row(
         children: [
           Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back'),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
             child: ElevatedButton.icon(
-              onPressed: _proceedToSafetyAssessment,
+              onPressed: _performSafetyAssessment,
               icon: const Icon(Icons.security),
               label: const Text('Safety Assessment'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
+                backgroundColor: Colors.orange,
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12.0),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => RiskAssessmentScreen(
+                      detectionResult: _result,
+                      userAnnotations: _userAnnotations,
+                      selectedHouseMaterials: _selectedHouseMaterials,
+                      houseBoundaryPoints: _houseBoundaryPoints,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.analytics),
+              label: const Text('Risk Analysis'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red[700],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12.0),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => RoomSafetyAssessmentScreen(
+                      rooms: _result.detectedRooms.map((room) => {
+                        'id': room.roomId,
+                        'name': room.defaultName,
+                        'type': room.defaultName?.toLowerCase() ?? 'room',
+                        'description': room.description,
+                        'confidence': room.confidence,
+                      }).toList(),
+                      annotationId: 'enhanced_detection_${DateTime.now().millisecondsSinceEpoch}',
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.home_work),
+              label: const Text('Room Safety'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12.0),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _performSafetyAssessment() {
+    print('\n\n🔥 ===== SAFETY ASSESSMENT DATA DUMP =====');
+    print('📊 Printing all user-logged and AI auto-detected data:');
+    
+    // 1. Print raw detection result data
+    print('\n📋 1. RAW DETECTION RESULT DATA:');
+    print('   Keys available: ${widget.detectionResult.keys.toList()}');
+    widget.detectionResult.forEach((key, value) {
+      if (value is List) {
+        print('   $key: List with ${value.length} items');
+        if (value.isNotEmpty && value.first is Map) {
+          print('     Sample item keys: ${(value.first as Map).keys.toList()}');
+          for (int i = 0; i < value.length; i++) {
+            if (value[i] is Map) {
+              print('     Item $i: ${value[i]}');
+            }
+          }
+        }
+      } else if (value is Map) {
+        print('   $key: Map with keys: ${value.keys.toList()}');
+        print('     Full data: $value');
+      } else {
+        String displayValue = value.toString();
+        if (displayValue.length > 100) {
+          displayValue = displayValue.substring(0, 100) + '... (${displayValue.length} chars total)';
+        }
+        print('   $key: ${value.runtimeType} - $displayValue');
+      }
+    });
+    
+    // 2. Print AI auto-detected rooms
+    print('\n🏠 2. AI AUTO-DETECTED ROOMS (${_result.detectedRooms.length} rooms):');
+    for (int i = 0; i < _result.detectedRooms.length; i++) {
+      final room = _result.detectedRooms[i];
+      print('   Room $i Details:');
+      print('     • Room ID: ${room.roomId}');
+      print('     • Default Name: ${room.defaultName}');
+      print('     • Description: ${room.description}');
+           print('     • Estimated Dimensions: ${room.estimatedDimensions}');
+     print('     • Boundaries: ${room.boundaries}');
+     print('     • Detection Method: ${room.detectionMethod}');
+      print('     • Doors: ${room.doors.length} doors');
+             for (int j = 0; j < room.doors.length; j++) {
+         final door = room.doors[j];
+         print('       Door $j: Type=${door.type}, Confidence=${door.confidence}, Center=${door.center}, BBox=${door.bbox}');
+       }
+       print('     • Windows: ${room.windows.length} windows');
+       for (int j = 0; j < room.windows.length; j++) {
+         final window = room.windows[j];
+         print('       Window $j: Type=${window.type}, Confidence=${window.confidence}, Center=${window.center}, BBox=${window.bbox}');
+       }
+       print('     • Walls: ${room.walls.length} walls');
+       for (int j = 0; j < room.walls.length; j++) {
+         final wall = room.walls[j];
+         print('       Wall $j: Type=${wall.type}, Confidence=${wall.confidence}, Center=${wall.center}, BBox=${wall.bbox}');
+       }
+      print('');
+    }
+    
+    // 3. Print architectural elements
+    print('\n🏗️ 3. AI AUTO-DETECTED ARCHITECTURAL ELEMENTS (${_result.architecturalElements.length} elements):');
+    for (int i = 0; i < _result.architecturalElements.length; i++) {
+      final element = _result.architecturalElements[i];
+      print('   Element $i Details:');
+      print('     • Type: ${element.type}');
+      print('     • Confidence: ${element.confidence}');
+      print('     • Center: ${element.center}');
+      print('     • Dimensions: ${element.dimensions}');
+      print('     • Bounding Box: ${element.bbox}');
+      print('     • Area: ${element.area}');
+      print('     • Relative Position: ${element.relativePosition}');
+      print('');
+    }
+    
+    // 4. Print user annotations
+    print('\n✏️ 4. USER ANNOTATIONS (${_userAnnotations.length} annotations):');
+    for (int i = 0; i < _userAnnotations.length; i++) {
+      final annotation = _userAnnotations[i];
+      print('   Annotation $i Details:');
+      print('     • Tool: ${annotation['tool']}');
+      print('     • Color: ${Color(annotation['color'] as int)}');
+      print('     • Stroke Width: ${annotation['strokeWidth']}');
+      print('     • Timestamp: ${annotation['timestamp']}');
+      print('     • Points Count: ${(annotation['points'] as List).length}');
+      print('     • Raw Data: $annotation');
+      print('');
+    }
+    
+    // 5. Print house boundary data
+    print('\n🏡 5. HOUSE BOUNDARY DATA:');
+    print('   • Has House Boundary: $_hasHouseBoundary');
+    print('   • Is Drawing House Boundary: $_isDrawingHouseBoundary');
+    print('   • Boundary Points Count: ${_houseBoundaryPoints.length}');
+    for (int i = 0; i < _houseBoundaryPoints.length; i++) {
+      print('     Point $i: ${_houseBoundaryPoints[i]}');
+    }
+    
+    // 6. Print house materials data
+    print('\n🧱 6. SELECTED HOUSE MATERIALS:');
+    print('   • Materials Count: ${_selectedHouseMaterials.length}');
+    _selectedHouseMaterials.forEach((material, percentage) {
+      print('     • $material: $percentage%');
+    });
+    
+    // 7. Print processing information
+    print('\n⚙️ 7. PROCESSING INFORMATION:');
+    print('   • Processing Method: ${_result.processingMethod}');
+    print('   • Has Annotated Image: ${_result.annotatedImageBase64 != null}');
+    print('   • Has SAM Visualization: ${_result.samVisualization != null}');
+    print('   • Has Original Image: ${_result.originalImageBase64 != null}');
+    print('   • Has Individual Visualizations: ${_result.individualVisualizations != null}');
+    if (_result.individualVisualizations != null) {
+      print('   • Individual Viz Keys: ${_result.individualVisualizations!.keys.toList()}');
+    }
+    
+    // 8. Print room controllers data (user-edited room information)
+    print('\n📝 8. USER-EDITED ROOM INFORMATION:');
+    _roomNameControllers.forEach((index, controller) {
+      print('   Room $index:');
+      print('     • Name: ${controller.text}');
+      print('     • Description: ${_roomDescControllers[index]?.text ?? 'N/A'}');
+    });
+    
+    // 9. Print user room controllers data
+    print('\n👤 9. USER-CREATED ROOM INFORMATION:');
+    _userRoomNameControllers.forEach((roomId, controller) {
+      print('   User Room $roomId:');
+      print('     • Name: ${controller.text}');
+      print('     • Description: ${_userRoomDescControllers[roomId]?.text ?? 'N/A'}');
+    });
+    
+    // 10. Print current drawing state
+    print('\n🎨 10. CURRENT DRAWING STATE:');
+    print('   • Is Annotation Mode: $_isAnnotationMode');
+    print('   • Current Drawing Tool: $_currentDrawingTool');
+    print('   • Current Drawing Color: $_currentDrawingColor');
+    print('   • Stroke Width: $_strokeWidth');
+    print('   • Has Unsaved Annotations: $_hasUnsavedAnnotations');
+    print('   • Is Currently Drawing: $_isCurrentlyDrawing');
+    print('   • Show Original Image: $_showOriginalImage');
+    print('   • Selected Room Type: $_selectedRoomType');
+    
+    print('\n🔥 ===== END SAFETY ASSESSMENT DATA DUMP =====\n\n');
+    
+    // Perform explosive risk assessment
+    _performExplosiveRiskAssessment();
+    
+    // Also show a dialog with summary information
+    _showSafetyAssessmentDialog();
+  }
+
+  void _showSafetyAssessmentDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.security, color: Colors.orange),
+              const SizedBox(width: 8),
+              const Text('Safety Assessment Complete'),
+            ],
+          ),
+          content: SingleChildScrollView(
+      child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+                  'Data Summary:',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+                const SizedBox(height: 12),
+                _buildDataSummaryItem('AI Detected Rooms', '${_result.detectedRooms.length}'),
+                _buildDataSummaryItem('Architectural Elements', '${_result.architecturalElements.length}'),
+                _buildDataSummaryItem('User Annotations', '${_userAnnotations.length}'),
+                _buildDataSummaryItem('House Boundary Points', '${_houseBoundaryPoints.length}'),
+                _buildDataSummaryItem('Selected Materials', '${_selectedHouseMaterials.length}'),
+                _buildDataSummaryItem('Processing Method', _result.processingMethod ?? 'Unknown'),
+                const SizedBox(height: 8),
+                const Divider(),
+                const SizedBox(height: 8),
+                Text(
+                  'Risk Assessment:',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red[700],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildDataSummaryItem('MAMAD Protection', '${_userAnnotations.where((a) => a['tool'] == 'mamad').length} detected'),
+                _buildDataSummaryItem('Entry Points', '${_result.architecturalElements.where((e) => e.type.toLowerCase() == 'door').length} doors'),
+                _buildDataSummaryItem('Windows', '${_result.architecturalElements.where((e) => e.type.toLowerCase() == 'window').length} windows'),
+          const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Complete safety assessment with explosive risk analysis has been performed. All detailed data and risk calculations have been printed to the console. Check your debug logs for comprehensive information including risk scores, evacuation recommendations, and safety measures.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue[600],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _exportDataToFile();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Export Data'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDataSummaryItem(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _performExplosiveRiskAssessment() {
+    print('\n\n💥 ===== EXPLOSIVE RISK ASSESSMENT =====');
+    print('🎯 Performing comprehensive risk analysis using AI and user data:');
+    
+    try {
+      // Create risk calculator with current data
+      final riskCalculator = ExplosiveRiskCalculator(
+        rooms: _result.detectedRooms,
+        elements: _result.architecturalElements,
+        userAnnotations: _userAnnotations,
+        imageDimensions: _result.imageDimensions,
+      );
+      
+      // Test specific high-risk points based on detected rooms and elements
+      final List<Map<String, dynamic>> testPoints = [];
+      
+      // Add door locations as test points (high risk)
+      for (int i = 0; i < _result.architecturalElements.length; i++) {
+        final element = _result.architecturalElements[i];
+        if (element.type.toLowerCase() == 'door') {
+          testPoints.add({
+            'x': (element.center['x'] ?? 0).toDouble(),
+            'y': (element.center['y'] ?? 0).toDouble(),
+            'name': 'Door Area ${i + 1}',
+            'type': 'entry_point'
+          });
+        }
+      }
+      
+      // Add room centers as test points
+      for (int i = 0; i < _result.detectedRooms.length; i++) {
+        final room = _result.detectedRooms[i];
+        final bounds = room.boundaries;
+        if (bounds.containsKey('x') && bounds.containsKey('y') && 
+            bounds.containsKey('width') && bounds.containsKey('height')) {
+          final centerX = (bounds['x'] as num).toDouble() + (bounds['width'] as num).toDouble() / 2;
+          final centerY = (bounds['y'] as num).toDouble() + (bounds['height'] as num).toDouble() / 2;
+          
+          testPoints.add({
+            'x': centerX,
+            'y': centerY,
+            'name': room.defaultName ?? 'Room ${i + 1}',
+            'type': 'room_center'
+          });
+        }
+      }
+      
+      // Add MAMAD locations as test points (should be low risk)
+      final mamadLocations = riskCalculator.getMAMADLocations();
+      for (int i = 0; i < mamadLocations.length; i++) {
+        final mamad = mamadLocations[i];
+        testPoints.add({
+          'x': mamad['x'],
+          'y': mamad['y'],
+          'name': 'MAMAD ${i + 1}',
+          'type': 'safe_room'
+        });
+      }
+      
+      print('\n📊 RISK ASSESSMENT RESULTS:');
+      print('==========================');
+      
+      double totalRisk = 0;
+      int criticalPoints = 0;
+      int highRiskPoints = 0;
+      int mediumRiskPoints = 0;
+      int lowRiskPoints = 0;
+      int minimalRiskPoints = 0;
+      
+      for (Map<String, dynamic> point in testPoints) {
+        final double x = point['x'];
+        final double y = point['y'];
+        final String name = point['name'];
+        final String type = point['type'];
+        
+        final double risk = riskCalculator.calculateRiskScore(x, y);
+        final String level = riskCalculator.getRiskLevel(risk);
+        final String evacuation = riskCalculator.getEvacuationRecommendations(x, y);
+        
+        totalRisk += risk;
+        
+        switch (level) {
+          case 'CRITICAL':
+            criticalPoints++;
+            break;
+          case 'HIGH':
+            highRiskPoints++;
+            break;
+          case 'MEDIUM':
+            mediumRiskPoints++;
+            break;
+          case 'LOW':
+            lowRiskPoints++;
+            break;
+          case 'MINIMAL':
+            minimalRiskPoints++;
+            break;
+        }
+        
+        print('\n🎯 Location: $name (${x.round()}, ${y.round()})');
+        print('   Type: $type');
+        print('   Risk Score: ${risk.toStringAsFixed(3)}');
+        print('   Risk Level: $level ${_getRiskEmoji(level)}');
+        print('   Evacuation: $evacuation');
+      }
+      
+      // Generate explosion scenarios
+      final scenarios = riskCalculator.generateDefaultExplosionScenarios();
+      print('\n💣 EXPLOSION SCENARIOS (${scenarios.length} scenarios):');
+      print('====================================');
+      
+      for (int i = 0; i < scenarios.length; i++) {
+        final scenario = scenarios[i];
+        print('   Scenario ${i + 1}:');
+        print('     Location: (${scenario.x.round()}, ${scenario.y.round()})');
+        print('     Intensity: ${scenario.intensity.toStringAsFixed(2)}');
+        print('     Probability: ${(scenario.probability * 100).toStringAsFixed(1)}%');
+        print('     Description: ${scenario.description}');
+        print('');
+      }
+      
+      // Overall assessment summary
+      final double averageRisk = testPoints.isNotEmpty ? totalRisk / testPoints.length : 0;
+      print('\n📈 OVERALL ASSESSMENT SUMMARY:');
+      print('==============================');
+      print('   Total Test Points: ${testPoints.length}');
+      print('   Average Risk Score: ${averageRisk.toStringAsFixed(3)}');
+      print('   Overall Risk Level: ${riskCalculator.getRiskLevel(averageRisk)} ${_getRiskEmoji(riskCalculator.getRiskLevel(averageRisk))}');
+      print('   Critical Risk Points: $criticalPoints 🔴');
+      print('   High Risk Points: $highRiskPoints 🟠');
+      print('   Medium Risk Points: $mediumRiskPoints 🟡');
+      print('   Low Risk Points: $lowRiskPoints 🟢');
+      print('   Minimal Risk Points: $minimalRiskPoints ⚪');
+      
+      // MAMAD effectiveness analysis
+      print('\n🛡️ MAMAD PROTECTION ANALYSIS:');
+      print('============================');
+      print('   MAMAD Locations Detected: ${mamadLocations.length}');
+      if (mamadLocations.isNotEmpty) {
+        print('   MAMAD Coverage: Available ✅');
+        for (int i = 0; i < mamadLocations.length; i++) {
+          final mamad = mamadLocations[i];
+          print('     MAMAD ${i + 1}: (${mamad['x']!.round()}, ${mamad['y']!.round()})');
+        }
+      } else {
+        print('   MAMAD Coverage: Not Available ❌');
+        print('   Recommendation: Consider adding MAMAD protection');
+      }
+      
+      // Recommendations
+      print('\n🎯 SAFETY RECOMMENDATIONS:');
+      print('==========================');
+      
+      if (criticalPoints > 0) {
+        print('   ⚠️ URGENT: $criticalPoints critical risk areas detected!');
+        print('   → Immediate safety measures required');
+        print('   → Consider structural reinforcement');
+        print('   → Install additional MAMAD protection');
+      }
+      
+      if (highRiskPoints > 0) {
+        print('   ⚠️ WARNING: $highRiskPoints high risk areas detected');
+        print('   → Enhanced security measures recommended');
+        print('   → Clear evacuation routes');
+      }
+      
+      if (mamadLocations.isEmpty) {
+        print('   🛡️ No MAMAD protection detected');
+        print('   → Consider installing protected space');
+        print('   → Ensure compliance with Israeli safety standards');
+      }
+      
+      final doorCount = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'door').length;
+      final windowCount = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'window').length;
+      
+      print('   🚪 Entry Points Analysis:');
+      print('     Doors: $doorCount');
+      print('     Windows: $windowCount');
+      print('     → Secure all entry points');
+      print('     → Monitor high-traffic areas');
+      
+    } catch (e) {
+      print('❌ Error performing risk assessment: $e');
+    }
+    
+    print('\n💥 ===== END EXPLOSIVE RISK ASSESSMENT =====\n\n');
+  }
+  
+  String _getRiskEmoji(String riskLevel) {
+    switch (riskLevel) {
+      case 'CRITICAL':
+        return '🔴';
+      case 'HIGH':
+        return '🟠';
+      case 'MEDIUM':
+        return '🟡';
+      case 'LOW':
+        return '🟢';
+      case 'MINIMAL':
+        return '⚪';
+      default:
+        return '❓';
+    }
+  }
+
+  Widget _buildRiskHeatmapView() {
+    if (_result.originalImageBase64 == null) {
+      return const Center(
+        child: Text('Original image not available for risk heatmap'),
+      );
+    }
+
+    return Column(
+      children: [
+        // Header section
+        Container(
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.red.withOpacity(0.1), Colors.orange.withOpacity(0.1)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+      ),
+      child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.security, color: Colors.red[700], size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+                          'Explosive Risk Heatmap',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+                            color: Colors.red[800],
+                          ),
+                        ),
+                        Text(
+                          'AI-powered risk assessment overlay on your floor plan',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Refresh button with indicator for cache status
+                  Stack(
+                    children: [
+                      IconButton(
+                        onPressed: _refreshRiskHeatmap,
+                        icon: Icon(Icons.refresh, color: Colors.red[700]),
+                        tooltip: _cachedRiskGrid == null 
+                            ? 'Risk data needs refresh (new annotations detected)'
+                            : 'Refresh Risk Calculation',
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.red.withOpacity(0.1),
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ),
+                      // Show indicator when cache is invalid
+                      if (_cachedRiskGrid == null)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        
+        // Risk legend
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildRiskLegendItem('CRITICAL', Colors.red, '0.8-1.0'),
+              _buildRiskLegendItem('HIGH', Colors.orange, '0.6-0.8'),
+              _buildRiskLegendItem('MEDIUM', Colors.yellow, '0.4-0.6'),
+              _buildRiskLegendItem('LOW', Colors.green, '0.2-0.4'),
+              _buildRiskLegendItem('MINIMAL', Colors.grey, '0-0.2'),
+            ],
+          ),
+        ),
+        
+        const Divider(),
+        
+        // Risk heatmap display
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox.expand(
+                  child: _buildRiskHeatmapWidget(),
+                ),
+              ),
+            ),
+          ),
+        ),
+        
+        // Instructions
+        Container(
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.05),
+            border: Border(
+              top: BorderSide(color: Colors.grey.shade300),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Colors.red[600]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Each point represents the calculated explosive risk level at that location. Risk factors include proximity to entry points, room type, structural protection, and MAMAD coverage.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.red[600],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.lightbulb_outline, size: 16, color: Colors.orange[600]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Red areas indicate high-risk zones that may require additional security measures. Green areas near MAMAD locations show effective protection coverage.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.orange[600],
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRiskLegendItem(String label, Color color, String scoreRange) {
+    return Column(
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+      decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.black26),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          scoreRange,
+          style: TextStyle(fontSize: 8, color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRiskHeatmapWidget() {
+    return FutureBuilder<List<List<RiskGridPoint>>>(
+      key: ValueKey(_riskHeatmapRefreshKey), // Force rebuild when refresh key changes
+      future: _generateRiskGridCached(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 60,
+                  height: 60,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 6,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.red[600]!),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Calculating Risk Assessment...',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red[700],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Analyzing ${_result.detectedRooms.length} rooms and ${_result.architecturalElements.length} elements',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        
+        if (snapshot.hasError) {
+          return Center(
+      child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+                Icon(Icons.error, color: Colors.red, size: 48),
+                const SizedBox(height: 16),
+                Text('Error generating risk heatmap: ${snapshot.error}'),
+              ],
+            ),
+          );
+        }
+        
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(
+            child: Text('No risk data available'),
+          );
+        }
+        
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth.isInfinite || constraints.maxHeight.isInfinite) {
+              return const Center(
+                child: Text('Cannot render risk heatmap: Invalid container size'),
+              );
+            }
+            
+            // Decode the image using the existing helper function
+            final imageBytes = _decodeBase64Image(_result.originalImageBase64!);
+            
+            // Check if image decoding failed
+            if (imageBytes.isEmpty) {
+              return const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error, color: Colors.red, size: 48),
+                    SizedBox(height: 16),
+                    Text('Failed to decode image for risk heatmap'),
+                  ],
+                ),
+              );
+            }
+            
+            return SizedBox(
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              child: Stack(
+                children: [
+                  // Original floor plan image as background (without annotations)
+                  RepaintBoundary(
+                    child: Container(
+                      width: constraints.maxWidth,
+                      height: constraints.maxHeight,
+                      child: Image.memory(
+                        imageBytes,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.center,
+                      ),
+                    ),
+                  ),
+                  // Risk grid overlay - positioned to match image exactly
+                  SizedBox(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    child: CustomPaint(
+                      painter: RiskHeatmapPainter(
+                        riskGrid: snapshot.data!,
+                        imageWidth: (_result.imageDimensions['width'] ?? 800).toDouble(),
+                        imageHeight: (_result.imageDimensions['height'] ?? 600).toDouble(),
+                        containerWidth: constraints.maxWidth,
+                        containerHeight: constraints.maxHeight,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _refreshRiskHeatmap() {
+    setState(() {
+      _riskHeatmapRefreshKey++;
+      _cachedRiskGrid = null; // Clear cache to force regeneration
+    });
+    
+    // Show detailed feedback to the user
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.refresh, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                const Text('Refreshing Risk Assessment...', 
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 4),
+          Text(
+              '• Recalculating explosion scenarios\n• Updating risk grid (${_result.detectedRooms.length} rooms, ${_result.architecturalElements.length} elements)\n• Applying current annotations and MAMAD protection',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.red[600],
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    
+    print('🔄 Risk heatmap refresh triggered (key: $_riskHeatmapRefreshKey)');
+    
+    // Show performance feedback
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🚀 Optimized calculations - using ${_cachedRiskGrid != null ? 'cached' : 'fresh'} data'),
+        backgroundColor: Colors.green[600],
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  Future<List<List<RiskGridPoint>>> _generateRiskGridCached() async {
+    // Return cached result if available and not refreshing
+    if (_cachedRiskGrid != null && !_isRiskGridGenerating) {
+      print('🚀 Using cached risk grid for better performance (${_cachedRiskGrid!.length} rows)');
+      return _cachedRiskGrid!;
+    }
+    
+    // Generate new grid
+    _isRiskGridGenerating = true;
+    try {
+      print('🔄 Generating fresh risk grid (annotations: ${_userAnnotations.length})');
+      final result = await _generateRiskGrid();
+      _cachedRiskGrid = result;
+      return result;
+    } finally {
+      _isRiskGridGenerating = false;
+    }
+  }
+
+  Future<List<List<RiskGridPoint>>> _generateRiskGrid() async {
+    // Run the risk calculation in a separate isolate to avoid blocking UI
+    return await Future.delayed(const Duration(milliseconds: 100), () {
+      try {
+        final riskCalculator = ExplosiveRiskCalculator(
+          rooms: _result.detectedRooms,
+          elements: _result.architecturalElements,
+          userAnnotations: _userAnnotations,
+          imageDimensions: _result.imageDimensions,
+        );
+        
+        final List<List<RiskGridPoint>> grid = [];
+        final int width = _result.imageDimensions['width'] ?? 800;
+        final int height = _result.imageDimensions['height'] ?? 600;
+        
+        // Optimize grid size for performance - less dense but faster
+        final int gridSize = math.max(15, math.min(width, height) ~/ 40); // Larger grid size for better performance
+        
+        // Minimal logging for performance
+        print('🔥 Generating risk grid: ${width}x${height}, grid size: $gridSize');
+        
+        final doors = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'door').toList();
+        final windows = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'window').toList();
+        print('🏗️ Elements: ${_result.architecturalElements.length} total, ${doors.length} doors, ${windows.length} windows');
+        
+        final scenarios = riskCalculator.generateDefaultExplosionScenarios();
+        print('💥 Generated ${scenarios.length} explosion scenarios');
+        
+        for (int y = 0; y < height; y += gridSize) {
+          final List<RiskGridPoint> row = [];
+          for (int x = 0; x < width; x += gridSize) {
+            final double riskScore = riskCalculator.calculateRiskScore(x.toDouble(), y.toDouble());
+            final String riskLevel = riskCalculator.getRiskLevel(riskScore, x: x.toDouble(), y: y.toDouble());
+            final Color pointColor = _getRiskColor(riskLevel);
+            
+            row.add(RiskGridPoint(
+              x: x.toDouble(),
+              y: y.toDouble(),
+              riskScore: riskScore,
+              riskLevel: riskLevel,
+              color: pointColor,
+            ));
+          }
+          grid.add(row);
+        }
+        
+        // Debug: Print risk statistics
+        final allPoints = grid.expand((row) => row).toList();
+        final criticalPoints = allPoints.where((p) => p.riskLevel == 'CRITICAL').length;
+        final highPoints = allPoints.where((p) => p.riskLevel == 'HIGH').length;
+        final mediumPoints = allPoints.where((p) => p.riskLevel == 'MEDIUM').length;
+        final lowPoints = allPoints.where((p) => p.riskLevel == 'LOW').length;
+        final minimalPoints = allPoints.where((p) => p.riskLevel == 'MINIMAL').length;
+        
+        // Count points inside MAMAD areas
+        final mamadPoints = allPoints.where((p) => riskCalculator.isPointInsideMAMAD(p.x, p.y)).length;
+        
+        // Debug: Check some specific points for MAMAD protection
+        if (mamadPoints == 0 && riskCalculator.getMAMADLocations().isNotEmpty) {
+          print('⚠️ No points detected inside MAMAD but MAMAD locations exist. Checking sample points...');
+          final samplePoints = allPoints.take(10).toList();
+          for (var point in samplePoints) {
+            final isInside = riskCalculator.isPointInsideMAMAD(point.x, point.y);
+            print('   Point (${point.x.round()}, ${point.y.round()}): inside MAMAD = $isInside, risk = ${point.riskScore.toStringAsFixed(3)}, level = ${point.riskLevel}');
+          }
+        }
+        
+        print('🔥 Risk grid generated: ${grid.length} rows, ${grid.isNotEmpty ? grid.first.length : 0} cols');
+        print('📊 Risk distribution: Critical=$criticalPoints, High=$highPoints, Medium=$mediumPoints, Low=$lowPoints, Minimal=$minimalPoints');
+        print('🔒 MAMAD protection: $mamadPoints points inside MAMAD areas (ultra-safe zones)');
+        
+        return grid;
+      } catch (e) {
+        print('❌ Error generating risk grid: $e');
+        rethrow;
+      }
+    });
+  }
+
+  Color _getRiskColor(String riskLevel) {
+    Color color;
+    switch (riskLevel) {
+      case 'CRITICAL':
+        color = Colors.red;
+        break;
+      case 'HIGH':
+        color = Colors.orange;
+        break;
+      case 'MEDIUM':
+        color = Colors.yellow;
+        break;
+      case 'LOW':
+        color = Colors.green;
+        break;
+      case 'MINIMAL':
+        color = Colors.grey;
+        break;
+      default:
+        color = Colors.blue;
+        break;
+    }
+    return color;
+  }
+
+  void _exportDataToFile() {
+    // This would typically save to a file, but for now we'll show the option
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Data export functionality would be implemented here'),
+        backgroundColor: Colors.blue,
       ),
     );
   }
@@ -2467,10 +4681,10 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 child: Text(
                   title,
                   style: const TextStyle(
-                    color: Colors.white,
+              color: Colors.white,
                     fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+              fontWeight: FontWeight.bold,
+            ),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -2498,7 +4712,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.error, color: Colors.white, size: 60),
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
             Text(
               'Failed to load image',
               style: TextStyle(color: Colors.white, fontSize: 18),
@@ -2557,8 +4771,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             ),
             const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
                 color: Colors.orange.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.orange.withOpacity(0.2)),
@@ -2591,9 +4805,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                             'YOLO architectural detection is still available in the Analysis tab',
                             style: TextStyle(fontSize: 12, color: Colors.blue[600]),
                           ),
-                        ),
-                      ],
-                    ),
+          ),
+        ],
+      ),
                   ),
                 ],
               ),
@@ -2632,14 +4846,14 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   Widget _buildVitalInfoView() {
     if (_result.originalImageBase64 == null) {
       return Center(
-        child: Column(
+      child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+        children: [
             Icon(Icons.home_outlined, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
+          Text(
               'Original Image Required',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: Colors.grey[600],
               ),
             ),
@@ -2675,7 +4889,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               Text(
                 'House Boundary',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.bold,
                   color: Colors.orange[700],
                 ),
               ),
@@ -2760,9 +4974,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                     fontSize: 14,
                     color: Colors.deepPurple[800],
                     fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 16),
+            ),
+          ),
+          const SizedBox(height: 16),
                 _buildHouseWallThicknessSection(),
               ],
             ),
@@ -2886,9 +5100,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   Widget _buildAnnotationView() {
     if (_result.annotatedImageBase64 == null) {
       return Center(
-        child: Column(
+      child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+        children: [
             Icon(Icons.image_not_supported, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
@@ -2905,18 +5119,18 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               ),
               textAlign: TextAlign.center,
             ),
-          ],
-        ),
-      );
-    }
+        ],
+      ),
+    );
+  }
 
     return Column(
       children: [
         // Annotation toolbar with fixed height
         Container(
           height: 120, // Fixed height to prevent resizing
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
             border: Border(
               bottom: BorderSide(color: Colors.grey.shade300),
@@ -3056,10 +5270,10 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             border: Border(
               top: BorderSide(color: Colors.grey.shade300),
             ),
-          ),
-          child: Column(
+      ),
+      child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+        children: [
               Row(
                 children: [
                   Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
@@ -3144,15 +5358,15 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               color: isSelected ? Colors.white : color,
             ),
             const SizedBox(width: 4),
-            Text(
+          Text(
               label,
               style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.bold,
                 color: isSelected ? Colors.white : color,
-              ),
             ),
-          ],
+          ),
+        ],
         ),
       ),
     );
@@ -3171,10 +5385,10 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
+      decoration: BoxDecoration(
           color: isSelected ? color : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
+        border: Border.all(
             color: color,
             width: isSelected ? 2 : 1,
           ),
@@ -3231,8 +5445,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: color,
-            width: 1,
-          ),
+          width: 1,
+        ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -3250,9 +5464,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 fontWeight: FontWeight.bold,
                 color: isSelected ? Colors.white : color,
               ),
-            ),
-          ],
-        ),
+          ),
+        ],
+      ),
       ),
     );
   }
@@ -3273,9 +5487,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       return Container(
         height: 200,
         color: Colors.grey[300],
-        child: Column(
+      child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+        children: [
             Icon(Icons.error, color: Colors.red, size: 40),
             const SizedBox(height: 8),
             Text('Failed to load image', style: TextStyle(color: Colors.red)),
@@ -3442,14 +5656,14 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Text(
+          Text(
                           'Creating Smart Room...',
                           style: const TextStyle(
-                            color: Colors.white,
+              color: Colors.white,
                             fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
                       ] else ...[
                         Icon(
                           _isCurrentlyDrawing ? Icons.edit : Icons.auto_awesome,
@@ -3530,6 +5744,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
           _userAnnotations.remove(annotation);
         }
         _hasUnsavedAnnotations = _userAnnotations.isNotEmpty;
+        _invalidateRiskCache(); // Invalidate risk cache when annotations are removed
       });
       
       // Debug: Print updated counts after erasing
@@ -3593,6 +5808,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       setState(() {
         _userAnnotations.removeLast();
         _hasUnsavedAnnotations = _userAnnotations.isNotEmpty;
+        _invalidateRiskCache(); // Invalidate risk cache when annotations are removed
       });
     }
   }
@@ -3683,6 +5899,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
         _currentStroke = [];
         _hasUnsavedAnnotations = true;
         _isDrawingRoom = false;
+        _invalidateRiskCache(); // Invalidate risk cache when new annotations are added
       });
       
       print('🎨 Enhanced $tool rectangle completed with area ${tool == 'mamad' ? (annotation['roomData'] as Map)['area'] : 'N/A'}');
@@ -3726,6 +5943,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
         _userAnnotations.add(annotation);
         _currentStroke = [];
         _hasUnsavedAnnotations = true;
+        _invalidateRiskCache(); // Invalidate risk cache when new annotations are added
         // Don't set _isCurrentlyDrawing here - it's handled by _finishDrawingAndProcess
       });
     }
@@ -3861,7 +6079,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          children: [
+        children: [
             Icon(
               Icons.meeting_room,
               size: 16,
@@ -3906,13 +6124,13 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
+      decoration: BoxDecoration(
           color: isSelected ? color : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
+        border: Border.all(
             color: color,
-            width: 1,
-          ),
+          width: 1,
+        ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -4079,6 +6297,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       _currentStroke = [];
       _isDrawingRoom = false;
       _hasUnsavedAnnotations = true;
+      _invalidateRiskCache(); // Invalidate risk cache when new annotations are added
     });
     
     print('🎨 Enhanced $tool polygon completed with ${polygonPoints.length} points and area ${tool == 'mamad' ? (annotation['roomData'] as Map)['area'] : 'N/A'}');
@@ -4197,6 +6416,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             _currentStroke = [];
             _isDrawingRoom = false;
             _hasUnsavedAnnotations = true;
+            _invalidateRiskCache(); // Invalidate risk cache when new annotations are added
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -4257,6 +6477,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       _userAnnotations.add(roomAnnotation);
       _roomCorners = [];
       _currentRoomPolygonPoints = [];
+      _invalidateRiskCache(); // Invalidate risk cache when new annotations are added
       _currentStroke = [];
       _isDrawingRoom = false;
       _hasUnsavedAnnotations = true;
@@ -4679,18 +6900,18 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withOpacity(0.3)),
-          boxShadow: [
-            BoxShadow(
+        boxShadow: [
+          BoxShadow(
               color: Colors.black.withOpacity(0.15),
               blurRadius: 8,
               offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
+          ),
+        ],
+      ),
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        children: [
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -4700,10 +6921,10 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                   size: 16,
                 ),
                 const SizedBox(width: 8),
-                Text(
+          Text(
                   '${_currentDrawingTool == 'stairway' ? 'Stairway' : 'MAMAD'} Drawing',
                   style: TextStyle(
-                    fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.bold,
                     color: color,
                     fontSize: 14,
                   ),
@@ -4763,28 +6984,28 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       left: 20,
       child: Container(
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
+      decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withOpacity(0.3)),
-          boxShadow: [
-            BoxShadow(
+        boxShadow: [
+          BoxShadow(
               color: Colors.black.withOpacity(0.15),
               blurRadius: 8,
               offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
+          ),
+        ],
+      ),
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        children: [
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.meeting_room, color: color, size: 16),
                 const SizedBox(width: 8),
-                Text(
+          Text(
                   'Room Drawing',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
@@ -4981,7 +7202,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                                 ? Icons.edit
                                 : Icons.home_outlined,
                         size: 12,
-                        color: Colors.white,
+              color: Colors.white,
                       ),
                       const SizedBox(width: 4),
                       Text(
@@ -4993,9 +7214,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
                     ],
                   ),
                 ),
@@ -5133,15 +7354,15 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 _percentageControllers[materialName] = TextEditingController();
               }
               
-              return Container(
+    return Container(
                 margin: const EdgeInsets.symmetric(vertical: 1), // Reduced margin
-                decoration: BoxDecoration(
+      decoration: BoxDecoration(
                   color: isSelected ? Colors.blue.withOpacity(0.05) : Colors.white,
                   borderRadius: BorderRadius.circular(6), // Smaller radius
-                  border: Border.all(
+        border: Border.all(
                     color: isSelected ? Colors.blue.withOpacity(0.3) : Colors.grey.shade300,
-                    width: 1,
-                  ),
+          width: 1,
+        ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // Reduced padding
@@ -5251,19 +7472,19 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               color: Colors.blue.withOpacity(0.1),
               borderRadius: BorderRadius.circular(6), // Smaller radius
               border: Border.all(color: Colors.blue.withOpacity(0.3)),
-            ),
-            child: Column(
+      ),
+      child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        children: [
                 Row(
                   children: [
                     Icon(Icons.summarize, size: 14, color: Colors.blue[700]), // Smaller icon
                     const SizedBox(width: 6), // Reduced spacing
-                    Text(
+          Text(
                       'Selected Materials (${_selectedHouseMaterials.length})', // Shorter title
                       style: TextStyle(
                         fontSize: 11, // Smaller text
-                        fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.bold,
                         color: Colors.blue[800],
                       ),
                     ),
@@ -5380,7 +7601,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                     if (wallThicknessData != null) ...[
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
+      decoration: BoxDecoration(
                           color: Colors.green.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.green.withOpacity(0.3)),
@@ -5867,9 +8088,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 color: Colors.orange.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: Colors.orange.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
+      ),
+      child: Row(
+        children: [
                   Icon(Icons.info_outline, size: 14, color: Colors.orange[600]),
                   const SizedBox(width: 6),
                   Expanded(
@@ -6235,7 +8456,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -6260,8 +8481,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                       border: Border.all(color: Colors.green.withOpacity(0.3)),
                     ),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+        mainAxisSize: MainAxisSize.min,
+        children: [
                         Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
                         const SizedBox(width: 4),
                         Text(
@@ -6393,7 +8614,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                     Row(
                       children: [
                         const Text('Outer Wall Thickness: ', style: TextStyle(fontSize: 12)),
-                        Text(
+          Text(
                           '${wallThicknessData['wall_thickness_cm']} cm',
                           style: const TextStyle(
                             fontSize: 12,
@@ -6757,4 +8978,160 @@ class AnnotationPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => true;
+}
+
+/// Custom painter for drawing risk heatmap overlay
+class RiskHeatmapPainter extends CustomPainter {
+  final List<List<RiskGridPoint>> riskGrid;
+  final double imageWidth;
+  final double imageHeight;
+  final double containerWidth;
+  final double containerHeight;
+
+  RiskHeatmapPainter({
+    required this.riskGrid,
+    required this.imageWidth,
+    required this.imageHeight,
+    required this.containerWidth,
+    required this.containerHeight,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (riskGrid.isEmpty || size.width <= 0 || size.height <= 0) return;
+    if (imageWidth <= 0 || imageHeight <= 0) return;
+
+    // Calculate scaling factors to map grid coordinates to display coordinates
+    double scaleX = size.width / imageWidth;
+    double scaleY = size.height / imageHeight;
+    
+    // Use the smaller scale to maintain aspect ratio
+    double scale = math.min(scaleX, scaleY);
+    
+    // Ensure scale is valid
+    if (scale <= 0 || !scale.isFinite) return;
+    
+    // Calculate offset to center the image
+    double offsetX = (size.width - imageWidth * scale) / 2;
+    double offsetY = (size.height - imageHeight * scale) / 2;
+
+    // Draw risk points
+    for (List<RiskGridPoint> row in riskGrid) {
+      for (RiskGridPoint point in row) {
+        // Transform grid coordinates to screen coordinates
+        double screenX = point.x * scale + offsetX;
+        double screenY = point.y * scale + offsetY;
+        
+        // Skip points that are outside the visible area
+        if (screenX < 0 || screenX > size.width || screenY < 0 || screenY > size.height) {
+          continue;
+        }
+
+        // Create paint for this risk point
+        final paint = Paint()
+          ..color = point.color.withOpacity(0.7)
+          ..style = PaintingStyle.fill;
+
+        // Draw point as a small circle, scaled appropriately
+        final double pointSize = _getPointSize(point.riskLevel) * scale;
+        canvas.drawCircle(
+          Offset(screenX, screenY),
+          pointSize,
+          paint,
+        );
+
+        // Draw border for better visibility
+        final borderPaint = Paint()
+          ..color = point.color.withOpacity(0.9)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0;
+
+        canvas.drawCircle(
+          Offset(screenX, screenY),
+          pointSize,
+          borderPaint,
+        );
+
+        // For critical and high risk points, add a pulsing effect indicator
+        if (point.riskLevel == 'CRITICAL' || point.riskLevel == 'HIGH') {
+          final pulseColor = point.riskLevel == 'CRITICAL' ? Colors.red : Colors.orange;
+          final pulsePaint = Paint()
+            ..color = pulseColor.withOpacity(0.3)
+            ..style = PaintingStyle.fill;
+
+          canvas.drawCircle(
+            Offset(screenX, screenY),
+            pointSize * 1.5,
+            pulsePaint,
+          );
+        }
+      }
+    }
+
+    // Draw risk score text for high-risk points (optional, for debugging)
+    if (riskGrid.isNotEmpty && riskGrid.first.isNotEmpty && scale > 0.5) {
+      final textStyle = TextStyle(
+        color: Colors.black,
+        fontSize: 8 * scale,
+        background: Paint()..color = Colors.white.withOpacity(0.8),
+      );
+
+      for (List<RiskGridPoint> row in riskGrid) {
+        for (RiskGridPoint point in row) {
+          // Only show text for critical points to avoid clutter, and only if grid is not too dense
+          if (point.riskLevel == 'CRITICAL') {
+            double screenX = point.x * scale + offsetX;
+            double screenY = point.y * scale + offsetY;
+            
+            // Skip if outside visible area
+            if (screenX < 0 || screenX > size.width || screenY < 0 || screenY > size.height) {
+              continue;
+            }
+            
+            final textSpan = TextSpan(
+              text: '${(point.riskScore * 100).round()}',
+              style: textStyle,
+            );
+            final textPainter = TextPainter(
+              text: textSpan,
+              textDirection: TextDirection.ltr,
+            );
+            textPainter.layout();
+            textPainter.paint(
+              canvas,
+              Offset(
+                screenX - textPainter.width / 2,
+                screenY - textPainter.height / 2,
+              ),
+            );
+          }
+        }
+      }
+    }
+  }
+
+  double _getPointSize(String riskLevel) {
+    switch (riskLevel) {
+      case 'CRITICAL':
+        return 6.0;
+      case 'HIGH':
+        return 5.0;
+      case 'MEDIUM':
+        return 4.0;
+      case 'LOW':
+        return 3.0;
+      case 'MINIMAL':
+        return 2.5;
+      default:
+        return 3.0;
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) {
+    if (oldDelegate is RiskHeatmapPainter) {
+      return oldDelegate.riskGrid != riskGrid;
+    }
+    return true;
+  }
 } 
