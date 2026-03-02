@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'dart:convert';
+import 'package:flutter/material.dart';import 'dart:convert';
 import 'dart:typed_data';
 import '../services/enhanced_floor_plan_service.dart';
 import '../utils/risk_assessment_utils.dart';
@@ -11,6 +10,8 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http_parser/http_parser.dart';
 import 'dart:math' as math;
+import 'dart:ui';
+import 'package:auto_size_text/auto_size_text.dart';
 
 // Add this constant
 const String API_BASE_URL = 'http://127.0.0.1:8000'; // or your actual backend URL
@@ -193,7 +194,7 @@ class ExplosiveRiskCalculator {
         })
         .toList();
         
-    print('🔒 Total MAMAD locations found: ${mamadAnnotations.length}');
+    //print('🔒 Total MAMAD locations found: ${mamadAnnotations.length}');
     return mamadAnnotations;
   }
 
@@ -650,6 +651,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   late EnhancedFloorPlanResult _result;
   int _selectedRoomIndex = 0;
   late TabController _tabController;
+  late ScrollController _vitalInfoScrollController;
+  final GlobalKey _houseThicknessKey = GlobalKey();
   
   // ===== ANNOTATION/DRAWING STATE VARIABLES =====
   bool _isAnnotationMode = false;
@@ -799,6 +802,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
     super.initState();
     _result = EnhancedFloorPlanResult.fromJson(widget.detectionResult);
     _tabController = TabController(length: 3, vsync: this);
+    _vitalInfoScrollController = ScrollController();
     
     // Tab controller initialized - no special listeners needed
     
@@ -889,6 +893,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
   @override
   void dispose() {
     _tabController.dispose();
+    _vitalInfoScrollController.dispose();
     
     // Dispose room controllers
     for (final controller in _roomNameControllers.values) {
@@ -982,6 +987,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
+                    physics: const NeverScrollableScrollPhysics(),
                     children: [
                       _buildAnalysisView(),
                       _buildAnnotationView(),
@@ -992,16 +998,94 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               ],
             ),
             
-            // Tutorial popup trigger
-            Positioned(
-              top: 120,
-              right: 16,
-              child: _buildTutorialButton(context),
+            // Always visible Next button at the bottom
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 36),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.blue[700]!.withOpacity(0.35),
+                            Colors.blue[800]!.withOpacity(0.25),
+                            Colors.white.withOpacity(0.08),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.blue[800]!.withOpacity(0.5),
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue[700]!.withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.1),
+                            blurRadius: 2,
+                            offset: const Offset(0, -1),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: _navigateToRiskAssessment,
+                          borderRadius: BorderRadius.circular(20),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue[700]!.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.blue[800]!.withOpacity(0.5),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.arrow_forward,
+                                    size: 24,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'Next: Risk Assessment',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: _buildBottomBar(),
+      //bottomNavigationBar: _buildBottomBar(),
     );
   }
 
@@ -1057,6 +1141,55 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             onPressed: _showAnalysisInfo,
             tooltip: 'Analysis Information',
           ),
+          // Next button to navigate to Risk Assessment
+          Container(
+            margin: const EdgeInsets.only(left: 8),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFF1976D2),
+                  Color(0xFF1565C0),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF1565C0).withOpacity(0.4),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: _navigateToRiskAssessment,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Next',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.arrow_forward,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1085,9 +1218,9 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
             2,
             Icons.home_outlined,
             'Vital Info',
-          ),
-        ],
-      ),
+            ),
+          ],
+        ),
     );
   }
 
@@ -1136,7 +1269,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
+        children: [
             Icon(
               icon,
               color: Colors.white,
@@ -1157,38 +1290,6 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
     );
   }
 
-  Widget _buildTutorialButton(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _showTutorialPopup(context),
-      child: Container(
-        width: 50,
-        height: 50,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: const Color(0xFFFFC107).withOpacity(0.9), // Same yellow as start screen
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFFFC107).withOpacity(0.4),
-              blurRadius: 15,
-              spreadRadius: 2,
-              offset: const Offset(0, 0),
-            ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.help_outline,
-          color: Colors.black87,
-          size: 24,
-        ),
-      ),
-    );
-  }
-
   void _showTutorialPopup(BuildContext context) {
     showDialog(
       context: context,
@@ -1201,17 +1302,17 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
           curve: Curves.elasticOut,
           builder: (context, value, child) {
             return Transform.scale(
-              scale: 0.8 + (0.2 * value),
+              scale: (0.8 + (0.2 * value)).clamp(0.8, 1.0),
               child: Transform.translate(
                 offset: Offset(0, 50 * (1 - value)),
                 child: Opacity(
-                  opacity: value,
+                  opacity: value.clamp(0.0, 1.0),
                   child: Dialog(
                     backgroundColor: Colors.transparent,
                     child: Container(
-                          width: 380, // Increased from 320
+                      constraints: const BoxConstraints(maxWidth: 600, minWidth: 320),
                       margin: const EdgeInsets.symmetric(horizontal: 20),
-                          padding: const EdgeInsets.all(28), // Increased padding
+                      padding: const EdgeInsets.all(32),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
@@ -1227,196 +1328,211 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
                           ),
                         ],
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Stage badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1565C0),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              'STAGE 2',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                          
-                              const SizedBox(height: 24),
-                          
-                          // Icon container
-                          Container(
-                                width: 90, // Increased from 80
-                                height: 90, // Increased from 80
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1565C0).withOpacity(0.1),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.analytics_outlined,
-                              color: Color(0xFF1565C0),
-                                  size: 45, // Increased from 40
-                            ),
-                          ),
-                          
-                              const SizedBox(height: 24), // Increased spacing
-                          
-                          // Title
-                          Text(
-                            'Enhanced Detection Results',
-                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              color: Colors.black87,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          
-                              const SizedBox(height: 12),
-                          
-                          // Description
-                          Text(
-                            'Review your floor plan analysis results and explore detailed safety assessments for each detected area.',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.grey[600],
-                              height: 1.4,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          
-                              const SizedBox(height: 28), // Increased spacing
-                          
-                          // How it works section
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              'How it works:',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                color: Colors.black87,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          
-                              const SizedBox(height: 18), // Increased spacing
-                          
-                          // Steps
-                          _buildNumberedStepInline(
-                            1,
-                            'Analysis Tab',
-                            'View detected rooms, safety scores, and detailed risk assessments',
-                          ),
-                          
-                              const SizedBox(height: 14), // Increased spacing
-                          
-                          _buildNumberedStepInline(
-                            2,
-                            'Annotate Tab',
-                            'Add custom annotations and mark MAMAD locations on your floor plan',
-                          ),
-                          
-                              const SizedBox(height: 14), // Increased spacing
-                          
-                          _buildNumberedStepInline(
-                            3,
-                            'Vital Info Tab',
-                            'Access emergency contacts, evacuation routes, and critical safety data',
-                          ),
-                          
-                              const SizedBox(height: 36), // Increased spacing
-                          
-                          // Action Buttons
-                          Row(
+                      child: SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minWidth: 320, maxWidth: 600),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Skip Tutorial Button
-                              Expanded(
-                                child: Container(
-                                      height: 52, // Increased from 50
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(25),
-                                    border: Border.all(
-                                      color: const Color(0xFF1565C0),
-                                      width: 1.5,
-                                    ),
+                              // Stage badge
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1565C0),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  'STAGE 2',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
                                   ),
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(25),
-                                      onTap: () => Navigator.of(context).pop(),
-                                      child: Center(
-                                        child: Text(
-                                          'Skip Tutorial',
-                                          style: TextStyle(
-                                            color: const Color(0xFF1565C0),
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 16,
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 24),
+                              
+                              // Icon container
+                              Container(
+                                width: 100,
+                                height: 100,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1565C0).withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.analytics_outlined,
+                                  color: Color(0xFF1565C0),
+                                  size: 50,
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 24),
+                              
+                              // Title
+                              Text(
+                                'Enhanced Detection Results',
+                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              
+                              const SizedBox(height: 12),
+                              
+                              // Description
+                              Text(
+                                'Review your floor plan analysis results and explore detailed safety assessments for each detected area.',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Colors.grey[600],
+                                  height: 1.4,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              
+                              const SizedBox(height: 28),
+                              
+                              // How it works section
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: AutoSizeText(
+                                  'How it works:',
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: Colors.black87,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  maxLines: 1,
+                                  minFontSize: 12,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 18),
+                              
+                              // Steps
+                              _buildNumberedStepInline(
+                                1,
+                                'Analysis Tab',
+                                'View detected rooms, safety scores, and detailed risk assessments',
+                              ),
+                              
+                              const SizedBox(height: 14),
+                              
+                              _buildNumberedStepInline(
+                                2,
+                                'Annotate Tab',
+                                'Add custom annotations and mark MAMAD locations on your floor plan',
+                              ),
+                              
+                              const SizedBox(height: 14),
+                              
+                              _buildNumberedStepInline(
+                                3,
+                                'Vital Info Tab',
+                                'Access emergency contacts, evacuation routes, and critical safety data',
+                              ),
+                              
+                              const SizedBox(height: 36),
+                              
+                              // Action Buttons
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Skip Tutorial Button
+                                  Expanded(
+                                    child: Container(
+                                      height: 54,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(25),
+                                        border: Border.all(
+                                          color: const Color(0xFF1565C0),
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(25),
+                                          onTap: () => Navigator.of(context).pop(),
+                                          child: Center(
+                                            child: AutoSizeText(
+                                              'Skip Tutorial',
+                                              style: TextStyle(
+                                                color: const Color(0xFF1565C0),
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 16,
+                                              ),
+                                              maxLines: 1,
+                                              minFontSize: 12,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                              
-                              const SizedBox(width: 16),
-                              
-                              // Got it Button
-                              Expanded(
-                                child: Container(
-                                      height: 52, // Increased from 50
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(25),
-                                    gradient: const LinearGradient(
-                                      colors: [
-                                        Color(0xFF1565C0), // Primary blue
-                                        Color(0xFF1976D2), // Lighter blue
-                                      ],
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(0xFF1565C0).withOpacity(0.3),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(25),
-                                      onTap: () => Navigator.of(context).pop(),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Text(
-                                            'Got it!',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          const Icon(
-                                            Icons.arrow_forward,
-                                            color: Colors.white,
-                                            size: 18,
+                                  
+                                  const SizedBox(width: 16),
+                                  
+                                  // Got it Button
+                                  Expanded(
+                                    child: Container(
+                                      height: 54,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(25),
+                                        gradient: const LinearGradient(
+                                          colors: [
+                                            Color(0xFF1565C0), // Primary blue
+                                            Color(0xFF1976D2), // Lighter blue
+                                          ],
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF1565C0).withOpacity(0.3),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 4),
                                           ),
                                         ],
                                       ),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(25),
+                                          onTap: () => Navigator.of(context).pop(),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              AutoSizeText(
+                                                'Got it!',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16,
+                                                ),
+                                                maxLines: 1,
+                                                minFontSize: 12,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              const Icon(
+                                                Icons.arrow_forward,
+                                                color: Colors.white,
+                                                size: 18,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1434,8 +1550,8 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 24,
-          height: 24,
+          width: 26,
+          height: 26,
           decoration: BoxDecoration(
             color: const Color(0xFF1565C0),
             shape: BoxShape.circle,
@@ -1446,7 +1562,7 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 12,
+                fontSize: 15,
               ),
             ),
           ),
@@ -1456,22 +1572,28 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              AutoSizeText(
                 title,
                 style: const TextStyle(
                   color: Colors.black87,
                   fontWeight: FontWeight.w600,
-                  fontSize: 14,
+                  fontSize: 15,
                 ),
+                maxLines: 1,
+                minFontSize: 12,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 4),
-              Text(
+              AutoSizeText(
                 description,
                 style: TextStyle(
                   color: Colors.grey[600],
-                  fontSize: 13,
+                  fontSize: 14,
                   height: 1.3,
                 ),
+                maxLines: 2,
+                minFontSize: 10,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -1480,147 +1602,23 @@ class _EnhancedDetectionResultsScreenState extends State<EnhancedDetectionResult
     );
   }
 
-     Widget _buildNumberedStep(int step, String title, String description) {
-       return Row(
-         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-           Container(
-             width: 24,
-             height: 24,
-             decoration: BoxDecoration(
-               color: const Color(0xFF1565C0),
-               shape: BoxShape.circle,
-             ),
-             child: Center(
-               child: Text(
-                 step.toString(),
-                 style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-                   fontSize: 12,
-                 ),
-               ),
-             ),
-           ),
-           const SizedBox(width: 12),
-           Expanded(
-             child: Column(
-               crossAxisAlignment: CrossAxisAlignment.start,
-               children: [
-                 Text(
-                   title,
-                   style: const TextStyle(
-                     color: Colors.black87,
-                     fontWeight: FontWeight.w600,
-                     fontSize: 14,
-                   ),
-                 ),
-                 const SizedBox(height: 4),
-                 Text(
-                   description,
-                   style: TextStyle(
-                     color: Colors.grey[600],
-                     fontSize: 13,
-                     height: 1.3,
-                   ),
-                 ),
-               ],
-             ),
-           ),
-         ],
-       );
-     }
-   }
-
-// Original method preserved for compatibility
-Widget _buildTutorialStep(int step, String title, String description, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: color.withOpacity(0.2),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-                  color: color.withOpacity(0.3),
-                  blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-            child: Center(
-              child: Text(
-                step.toString(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-                    Icon(icon, color: color, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: color,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: TextStyle(
-                    color: Colors.grey[700],
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildAnalysisView() {
+    final isCompact = MediaQuery.of(context).size.width < 690;
+    
     return Column(
       children: [
         _buildSummaryCard(),
-              Expanded(
+        Expanded(
           child: Row(
             children: [
-              // Left panel - Room list
+              // Left panel - Room list (narrower on small screens)
               Expanded(
-                flex: 1,
+                flex: isCompact ? 1 : 1,
                 child: _buildRoomList(),
               ),
-              // Right panel - Room details
+              // Right panel - Room details (wider on small screens)
               Expanded(
-                flex: 2,
+                flex: isCompact ? 3 : 2,
                 child: _buildRoomDetails(),
               ),
             ],
@@ -1632,1219 +1630,293 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
 
   Widget _buildRoomList() {
     final allRooms = _getAllRooms();
+    final isCompact = MediaQuery.of(context).size.width < 450;
     
-    return Card(
-      margin: const EdgeInsets.all(8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Text(
-                  'All Rooms (${allRooms.length})',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const Spacer(),
-                if (_getUserDrawnRooms().isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.edit, size: 10, color: Colors.green[700]),
-                        const SizedBox(width: 2),
-                        Text(
-                          '${_getUserDrawnRooms().length} user-drawn',
-                          style: TextStyle(
-                            fontSize: 9,
-                            color: Colors.green[700],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: allRooms.length,
-              itemBuilder: (context, index) {
-                final room = allRooms[index];
-                final isSelected = index == _selectedRoomIndex;
-                final isUserDrawn = room['isUserDrawn'] as bool;
-                
-                return ListTile(
-                  selected: isSelected,
-                  leading: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: isSelected 
-                            ? (isUserDrawn ? Colors.green : Colors.blue)
-                            : Colors.grey.shade300,
-                child: Text(
-                          (index + 1).toString(),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.black,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-                      if (isUserDrawn)
-                        Positioned(
-                          top: -2,
-                          right: -2,
-                          child: Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: Colors.green,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 1),
-                            ),
-                            child: Icon(
-                              Icons.edit,
-                              size: 8,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          room['defaultName'],
-                          style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            color: isUserDrawn ? Colors.green[800] : null,
-                          ),
-                        ),
-                      ),
-                      if (isUserDrawn) ...[
-                        Icon(
-                          room['roomData'] != null && (room['roomData'] as Map)['shape'] == 'triangle'
-                              ? Icons.change_history
-                              : Icons.rectangle_outlined,
-                          size: 16,
-                          color: Colors.green[600],
-                        ),
-                      ],
-                    ],
-                  ),
-                  subtitle: Text(
-                    isUserDrawn 
-                        ? 'User-drawn • ${(room['roomData'] as Map)['shape']}'
-                        : 'Confidence: ${(room['confidence'] * 100).toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      color: isUserDrawn 
-                          ? Colors.green[600]
-                          : _getConfidenceColor(room['confidence']),
-                    ),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!isUserDrawn) ...[
-                        if ((room['doors'] as List).isNotEmpty)
-                          Icon(Icons.door_front_door, size: 16, color: Colors.orange),
-                        if ((room['windows'] as List).isNotEmpty)
-                          Icon(Icons.window, size: 16, color: Colors.blue),
-                      ],
-                    ],
-                  ),
-                  onTap: () {
-                  setState(() {
-                      _selectedRoomIndex = index;
-                    });
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPointSegmentationSection() {
-    // Check if point segmentation result is available in the data
-    final pointSegmentationResult = widget.detectionResult['point_segmentation_result'];
-    
-    if (pointSegmentationResult != null && pointSegmentationResult['visualization'] != null) {
-      return Column(
-        children: [
-          _buildPointSegmentationCard(pointSegmentationResult),
-          const SizedBox(height: 20),
-        ],
-      );
-    } else {
-      // Show a card explaining how to use point segmentation
-      return Column(
-        children: [
-          _buildPointSegmentationInfoCard(),
-          const SizedBox(height: 20),
-        ],
-      );
-    }
-  }
-
-  Widget _buildPointSegmentationCard(Map<String, dynamic> pointResult) {
-    final visualization = pointResult['visualization'];
-    final masks = pointResult['masks'] ?? [];
-    final totalMasks = pointResult['total_masks'] ?? 0;
-    final metadata = pointResult['metadata'] ?? {};
-    
-    return Card(
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.indigo.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.touch_app, color: Colors.indigo, size: 28),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Point-Based Segmentation Results',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.indigo,
-                        ),
-                      ),
-                      Text(
-                        'EfficientViTSAM-style point segmentation with ${totalMasks} mask(s) generated',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.indigo.withOpacity(0.1), Colors.transparent],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.indigo.withOpacity(0.3)),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: GestureDetector(
-                  onTap: () => _showFullScreenImage('Point-Based Segmentation Results', visualization),
-                  child: _buildImageWidget(visualization),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.indigo.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.indigo.withOpacity(0.2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Point Segmentation Details:',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo[800]),
-          ),
-          const SizedBox(height: 8),
-                  _buildPointSegmentationDetail('Total Masks Generated', totalMasks.toString(), Icons.layers),
-                  _buildPointSegmentationDetail('Input Points', '${pointResult['point_count'] ?? 'N/A'}', Icons.touch_app),
-                  _buildPointSegmentationDetail('Segmentation Method', 'SAM Point Prompt', Icons.psychology),
-                  if (masks.isNotEmpty) ...[
-                    _buildPointSegmentationDetail('Best Mask Score', '${(masks[0]['score'] * 100).toStringAsFixed(1)}%', Icons.verified),
-                    _buildPointSegmentationDetail('Segmented Area', '${masks[0]['area_percentage'].toStringAsFixed(1)}% of image', Icons.area_chart),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Icon(Icons.info_outline, size: 16, color: Colors.indigo[600]),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    'This shows the result of clicking on specific points in the floor plan to segment rooms, similar to EfficientViTSAM\'s --mode point functionality.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.indigo[600],
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ),
-              ],
+    return SizedBox(
+      width: isCompact ? 60 : null,
+      child: Container(
+        margin: const EdgeInsets.all(8.0),
+        decoration: BoxDecoration(
+          color: Colors.grey.withOpacity(0.25),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.18),
+              blurRadius: 32,
+              offset: const Offset(0, 12),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildPointSegmentationDetail(String title, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 14, color: Colors.indigo[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(fontSize: 12, color: Colors.indigo[800]),
-                children: [
-                  TextSpan(text: '$title: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  TextSpan(text: value),
-                ],
-                    ),
-                  ),
-                ),
-              ],
-      ),
-    );
-  }
-
-  Widget _buildPointSegmentationInfoCard() {
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.touch_app, color: Colors.teal, size: 28),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                        'Point-Based Segmentation Available',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.teal[800],
-                        ),
-                      ),
-                      Text(
-                        'Click on specific points in floor plans to segment rooms',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.teal.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.teal.withOpacity(0.2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'How to Use Point Segmentation:',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal[800]),
-                ),
-                const SizedBox(height: 8),
-                  _buildHowToItem('1. Upload a floor plan image'),
-                  _buildHowToItem('2. Click on specific points where you want to segment'),
-                  _buildHowToItem('3. Get precise room segmentation masks'),
-                  _buildHowToItem('4. View results with confidence scores'),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
+                if (MediaQuery.of(context).size.width >= 690)
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
                     child: Row(
                       children: [
-                        Icon(Icons.api, size: 16, color: Colors.blue[600]),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'API Endpoint: POST /api/segment-room-with-points',
-                            style: TextStyle(fontSize: 12, color: Colors.blue[600], fontFamily: 'monospace'),
+                        Text(
+                          'All Rooms (${allRooms.length})',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
+                        const Spacer(),
+                        if (_getUserDrawnRooms().isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.edit, size: 10, color: Colors.green[700]),
+                                const SizedBox(width: 2),
+                                Text(
+                                  '${_getUserDrawnRooms().length} user-drawn',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.purple.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.psychology, size: 16, color: Colors.purple[600]),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Powered by Meta\'s Segment Anything Model (SAM)',
-                            style: TextStyle(fontSize: 12, color: Colors.purple[600]),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: allRooms.length,
+                    itemBuilder: (context, index) {
+                      final room = allRooms[index];
+                      final isSelected = index == _selectedRoomIndex;
+                      final isUserDrawn = room['isUserDrawn'] as bool;
+                      final isCompact = MediaQuery.of(context).size.width < 450;
+                      
+                      if (isCompact) {
+                        // Compact layout - just the circle
+                        return Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+                          child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                _selectedRoomIndex = index;
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(30),
+                            child: Container(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Center(
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 20,
+                                      backgroundColor: isSelected 
+                                          ? (isUserDrawn ? Colors.green : Colors.blue)
+                                          : Colors.grey.shade300,
+                                      child: Text(
+                                        (index + 1).toString(),
+                                        style: TextStyle(
+                                          color: isSelected ? Colors.white : Colors.black,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ),
+                                    if (isUserDrawn)
+                                      Positioned(
+                                        top: -2,
+                                        right: -2,
+                                        child: Container(
+                                          width: 14,
+                                          height: 14,
+                                          decoration: BoxDecoration(
+                                            color: Colors.green,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: Colors.white, width: 1),
+                                          ),
+                                          child: Icon(
+                                            Icons.edit,
+                                            size: 10,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHowToItem(String instruction) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.arrow_right, size: 14, color: Colors.teal[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              instruction,
-              style: TextStyle(fontSize: 12, color: Colors.teal[800]),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildImageCard(String title, String base64Image, IconData icon, Color color, String description) {
-    return Card(
-      elevation: 4,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: color, size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              description,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: color.withOpacity(0.3)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: GestureDetector(
-                  onTap: () => _showFullScreenImage(title, base64Image),
-                  child: _buildImageWidget(base64Image),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Tap to view full screen',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.grey[600],
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildImageWidget(String base64Image) {
-    Uint8List imageBytes = _decodeBase64Image(base64Image);
-    if (imageBytes.isEmpty) {
-      return Container(
-        height: 200,
-        color: Colors.grey[300],
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error, color: Colors.red, size: 40),
-            const SizedBox(height: 8),
-            Text('Failed to load image', style: TextStyle(color: Colors.red)),
-          ],
-        ),
-      );
-    }
-    return Stack(
-      children: [
-        RepaintBoundary( // Prevent image from repainting unnecessarily
-          child: Image.memory(
-            imageBytes,
-            key: const ValueKey('annotation_image'), // Consistent key for layout stability
-            fit: BoxFit.contain,
-            width: double.infinity,
-            height: double.infinity,
-          ),
-        ),
-        // Custom painter for annotations - optimized for performance
-        if (!_isCurrentlyDrawing || _currentDrawingTool == 'eraser')
-          Positioned.fill(
-            child: RepaintBoundary( // Prevent unnecessary repaints
-              child: CustomPaint(
-                painter: AnnotationPainter(
-                  annotations: _userAnnotations,
-                  currentStroke: _currentDrawingTool == 'eraser' ? _currentStroke : [],
-                  strokeColor: _getToolColor(_currentDrawingTool),
-                  strokeWidth: _strokeWidth,
-                  isEraser: _currentDrawingTool == 'eraser',
-                ),
-              ),
-            ),
-          ),
-        // Show current stroke while drawing
-        if (_isCurrentlyDrawing && _currentDrawingTool != 'eraser')
-          Positioned.fill(
-            child: CustomPaint(
-              painter: AnnotationPainter(
-                annotations: [],
-                currentStroke: _currentStroke,
-                strokeColor: _getToolColor(_currentDrawingTool),
-                strokeWidth: _strokeWidth,
-                isEraser: false,
-              ),
-            ),
-          ),
-        // Image mode indicator
-        Positioned(
-          top: 8,
-          right: 8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: _isCurrentlyDrawing 
-                  ? Colors.green.withOpacity(0.9)
-                  : Colors.blue.withOpacity(0.9),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _isCurrentlyDrawing ? Icons.edit : Icons.auto_awesome,
-                  size: 12,
-                    color: Colors.white,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _isCurrentlyDrawing ? 'Drawing Mode' : 'AI Detection View',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+                        );
+                      } else {
+                        // Full layout - ListTile with all details
+                        return ListTile(
+                          selected: isSelected,
+                          leading: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: isSelected 
+                                    ? (isUserDrawn ? Colors.green : Colors.blue)
+                                    : Colors.grey.shade300,
+                                child: Text(
+                                  (index + 1).toString(),
+                                  style: TextStyle(
+                                    color: isSelected ? Colors.white : Colors.black,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              if (isUserDrawn)
+                                Positioned(
+                                  top: -2,
+                                  right: -2,
+                                  child: Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: Colors.green,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 1),
+                                    ),
+                                    child: Icon(
+                                      Icons.edit,
+                                      size: 8,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  room['defaultName'],
+                                  style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    color: isUserDrawn ? Colors.green[800] : Colors.white,
+                                  ),
+                                ),
+                              ),
+                              if (isUserDrawn) ...[
+                                Icon(
+                                  room['roomData'] != null && (room['roomData'] as Map)['shape'] == 'triangle'
+                                      ? Icons.change_history
+                                      : Icons.rectangle_outlined,
+                                  size: 16,
+                                  color: Colors.green[600],
+                                ),
+                              ],
+                            ],
+                          ),
+                          subtitle: Text(
+                            isUserDrawn 
+                                ? 'User-drawn • ${(room['roomData'] as Map)['shape']}'
+                                : 'Confidence: ${(room['confidence'] * 100).toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              color: isUserDrawn 
+                                  ? Colors.green[600]
+                                  : _getConfidenceColor(room['confidence']),
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!isUserDrawn) ...[
+                                if ((room['doors'] as List).isNotEmpty)
+                                  Icon(Icons.door_front_door, size: 16, color: Colors.orange),
+                                if ((room['windows'] as List).isNotEmpty)
+                                  Icon(Icons.window, size: 16, color: Colors.blue),
+                              ],
+                            ],
+                          ),
+                          onTap: () {
+                            setState(() {
+                              _selectedRoomIndex = index;
+                            });
+                          },
+                        );
+                      }
+                    },
                   ),
                 ),
               ],
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildSamCompositeCard() {
-    // Check if individual visualizations are available
-    final individualViz = _result.individualVisualizations;
-    
-    if (individualViz != null && individualViz.isNotEmpty) {
-      return _buildIndividualSamVisualizationsCard(individualViz);
-    }
-    
-    // Fallback to composite view if individual visualizations not available
-    return Card(
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.view_module, color: Colors.purple, size: 28),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'SAM Room Segmentation',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.purple,
-                        ),
-                      ),
-                      Text(
-                        'Multiple visualization styles inspired by Meta\'s official SAM repository',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.purple.withOpacity(0.1), Colors.transparent],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.purple.withOpacity(0.3)),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: GestureDetector(
-                  onTap: () => _showFullScreenImage('SAM Room Segmentation - Multiple Views', _result.samVisualization!),
-                  child: _buildImageWidget(_result.samVisualization!),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.purple.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.purple.withOpacity(0.2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Visualization Components:',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple[800]),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildVisualizationComponent('Original Image', 'Left panel - your original floor plan', Icons.image),
-                  _buildVisualizationComponent('SAM Masks Overlay', 'Top right - transparent colored masks over original', Icons.layers),
-                  _buildVisualizationComponent('Colored Segments', 'Middle right - solid colored room segments', Icons.palette),
-                  _buildVisualizationComponent('Boundaries Only', 'Bottom left - room outline boundaries', Icons.border_all),
-                  _buildVisualizationComponent('Labeled Segments', 'Bottom right - segments with room information', Icons.label),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-            children: [
-                Icon(Icons.touch_app, size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 4),
-                Text(
-                  'Tap to view full screen with zoom and pan controls',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600],
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
 
-  Widget _buildIndividualSamVisualizationsCard(Map<String, dynamic> individualViz) {
-    return Card(
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.view_module, color: Colors.purple, size: 28),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'SAM Room Segmentation Results',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.purple,
-                        ),
-                      ),
-                      Text(
-                        'Source image and segmented results with colored room overlays',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            
-            // Source Image (Original)
-            if (individualViz['original'] != null) ...[
-              _buildIndividualVisualizationSection(
-                'Source Image',
-                'Your original floor plan as input to SAM',
-                individualViz['original'],
-                Icons.image_outlined,
-                Colors.blue,
-              ),
-              const SizedBox(height: 16),
-            ],
-            
-            // Segmentation Result (Masks Overlay)
-            if (individualViz['masks_overlay'] != null) ...[
-              _buildIndividualVisualizationSection(
-                'Segmentation Result',
-                'Original image with colored room segment overlays',
-                individualViz['masks_overlay'],
-                Icons.layers,
-                Colors.green,
-              ),
-              const SizedBox(height: 16),
-            ],
-            
-            // Optional: Show other visualizations in a collapsible section
-            _buildOtherVisualizationsSection(individualViz),
-            
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.purple.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.purple.withOpacity(0.2)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: Colors.purple[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'The segmentation result shows detected rooms with transparent colored overlays. Each color represents a different room segment detected by SAM.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.purple[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildIndividualVisualizationSection(
-    String title,
-    String description,
-    String base64Image,
-    IconData icon,
-    Color color,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          description,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Colors.grey[600],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: color.withOpacity(0.3)),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: GestureDetector(
-              onTap: () => _showFullScreenImage(title, base64Image),
-              child: _buildImageWidget(base64Image),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Tap to view full screen',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Colors.grey[500],
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOtherVisualizationsSection(Map<String, dynamic> individualViz) {
-    // Check what other visualizations are available
-    final otherViz = <String, String>{};
-    
-    if (individualViz['colored_segments'] != null) {
-      otherViz['Colored Segments'] = individualViz['colored_segments'];
-    }
-    if (individualViz['boundaries'] != null) {
-      otherViz['Boundaries Only'] = individualViz['boundaries'];
-    }
-    if (individualViz['labeled_segments'] != null) {
-      otherViz['Labeled Segments'] = individualViz['labeled_segments'];
-    }
-    
-    if (otherViz.isEmpty) return const SizedBox.shrink();
-    
-    return ExpansionTile(
-      leading: Icon(Icons.visibility, color: Colors.purple[600]),
-      title: Text(
-        'Additional Visualizations',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.purple[800],
-        ),
-      ),
-      subtitle: Text(
-        'View alternative visualization styles',
-        style: TextStyle(color: Colors.grey[600], fontSize: 12),
-      ),
-      children: otherViz.entries.map((entry) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: _buildIndividualVisualizationSection(
-            entry.key,
-            _getVisualizationDescription(entry.key),
-            entry.value,
-            _getVisualizationIcon(entry.key),
-            Colors.purple,
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  String _getVisualizationDescription(String type) {
-    switch (type) {
-      case 'Colored Segments':
-        return 'Solid colored room segments without original image background';
-      case 'Boundaries Only':
-        return 'Room boundaries and outlines overlaid on original image';
-      case 'Labeled Segments':
-        return 'Room segments with labels showing room information and area percentages';
-      default:
-        return 'Alternative visualization style';
-    }
-  }
-
-  IconData _getVisualizationIcon(String type) {
-    switch (type) {
-      case 'Colored Segments':
-        return Icons.palette;
-      case 'Boundaries Only':
-        return Icons.border_all;
-      case 'Labeled Segments':
-        return Icons.label;
-      default:
-        return Icons.image;
-    }
-  }
-
-  Widget _buildVisualizationComponent(String title, String description, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 14, color: Colors.purple[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(fontSize: 12, color: Colors.purple[800]),
-                children: [
-                  TextSpan(text: '$title: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  TextSpan(text: description),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSamTechnicalInfoCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.science, color: Colors.blue[600]),
-                const SizedBox(width: 8),
-                Text(
-                  'Technical Information',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _buildTechnicalInfoRow('Model Architecture', 'YOLO + SAM Hybrid Approach'),
-            _buildTechnicalInfoRow('YOLO Model', 'YOLOv8 trained on architectural elements'),
-            _buildTechnicalInfoRow('SAM Model', 'Meta\'s Segment Anything Model for room segmentation'),
-            _buildTechnicalInfoRow('Processing Method', _result.processingMethod.replaceAll('_', ' ').toUpperCase()),
-            _buildTechnicalInfoRow('Detection Confidence', '${(_result.detectionConfidence * 100).toStringAsFixed(0)}%'),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.link, size: 16, color: Colors.blue[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Based on Meta AI Research\'s Segment Anything Model',
-                      style: TextStyle(fontSize: 12, color: Colors.blue[600]),
-                    ),
-          ),
-        ],
-      ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTechnicalInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAnalysisInsightsCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-      child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-            Row(
-              children: [
-                Icon(Icons.insights, color: Colors.green[600]),
-                const SizedBox(width: 8),
-          Text(
-                  'Analysis Insights',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _buildInsightRow(
-              'Rooms Detected',
-              '${_result.detectedRooms.length}',
-              Icons.room,
-              Colors.blue,
-            ),
-            _buildInsightRow(
-              'Architectural Elements',
-              '${_result.totalDoors + _result.totalWindows + _result.totalWalls}',
-              Icons.architecture,
-              Colors.orange,
-            ),
-            _buildInsightRow(
-              'Detection Accuracy',
-              _getAccuracyDescription(),
-              Icons.verified,
-              Colors.green,
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                _result.analysisSummary,
-                style: TextStyle(fontSize: 12, color: Colors.green[700]),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _getAnnotationSummary(),
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            // Add legend if user has annotations
-            if (_userAnnotations.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.withOpacity(0.2)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Legend: ',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'AI Detected',
-                      style: TextStyle(fontSize: 11, color: Colors.blue),
-                    ),
-                    const SizedBox(width: 16),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: Colors.green,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'User Drawn',
-                      style: TextStyle(fontSize: 11, color: Colors.green),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInsightRow(String label, String value, IconData icon, Color color) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(fontSize: 13)),
-          const Spacer(),
-          Text(
-            value,
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _getAccuracyDescription() {
-    if (_result.detectionConfidence >= 0.8) return 'High Confidence';
-    if (_result.detectionConfidence >= 0.6) return 'Good Confidence';
-    return 'Moderate Confidence';
-  }
 
   Widget _buildSummaryCard() {
     final combinedCounts = _getCombinedElementCounts();
     
-    return Card(
+    return Container(
       margin: const EdgeInsets.all(16.0),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(20.0),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  _getMethodIcon(_result.processingMethod),
-                  color: _getMethodColor(_result.processingMethod),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Analysis Summary',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const Spacer(),
+          // User annotations badge (if any)
                 if (_userAnnotations.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  color: Colors.green.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.green.withOpacity(0.4)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.edit, size: 12, color: Colors.green[700]),
-                        const SizedBox(width: 4),
+                    Icon(Icons.edit, size: 14, color: Colors.green[300]),
+                    const SizedBox(width: 6),
                         Text(
                           '${_userAnnotations.length} user additions',
                           style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.green[700],
-                            fontWeight: FontWeight.w500,
+                        fontSize: 12,
+                        color: Colors.green[300],
+                        fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
-              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
+          ],
             Row(
               children: [
                 _buildEnhancedSummaryItem('Rooms', combinedCounts['rooms']!.toString(), Icons.room, 0, 0),
@@ -2875,9 +1947,11 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
               ),
             ],
             const SizedBox(height: 8),
-            Text(
+            Center(
+              child: Text(
               _getAnnotationSummary(),
               style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
             if (_result.error != null) ...[
               const SizedBox(height: 8),
@@ -2902,9 +1976,9 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
               ),
             ],
           ],
-        ),
       ),
     );
+    // );
   }
 
   Widget _buildEnhancedSummaryItem(String label, String value, IconData icon, int aiCount, int userCount) {
@@ -2914,36 +1988,44 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
           Stack(
             alignment: Alignment.center,
             children: [
-              Icon(icon, size: 24, color: Colors.blue),
+              Icon(icon, size: 28, color: Colors.white.withOpacity(0.9)),
               if (userCount > 0)
                 Positioned(
                   top: -2,
                   right: -2,
                   child: Container(
-                    width: 12,
-                    height: 12,
+                    width: 14,
+                    height: 14,
                     decoration: BoxDecoration(
                       color: Colors.green,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1),
+                      border: Border.all(color: Colors.white, width: 1.5),
                     ),
                     child: Icon(
                       Icons.edit,
-                      size: 8,
-              color: Colors.white,
+                      size: 9,
+                      color: Colors.white,
                     ),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              fontSize: 20, 
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
           ),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 13, 
+              color: Colors.white.withOpacity(0.7),
+              fontWeight: FontWeight.w500,
+            ),
           ),
           if (aiCount > 0 && userCount > 0) ...[
             const SizedBox(height: 2),
@@ -3009,178 +2091,200 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     final allRooms = _getAllRooms();
     
     if (allRooms.isEmpty) {
-      return const Card(
-        margin: EdgeInsets.all(8.0),
-        child: Center(
-          child: Text('No rooms detected'),
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.all(24.0),
+          decoration: BoxDecoration(
+            color: Colors.grey.withOpacity(0.25),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.18),
+                blurRadius: 32,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: const Text('No rooms detected', style: TextStyle(color: Colors.white70)),
         ),
       );
     }
 
     final room = allRooms[_selectedRoomIndex];
-    
     final isUserDrawn = room['isUserDrawn'] as bool;
-    
-    return Card(
+
+    return Container(
       margin: const EdgeInsets.all(8.0),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 32,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  backgroundColor: isUserDrawn ? Colors.green : Colors.blue,
-                  child: Text(
-                    (_selectedRoomIndex + 1).toString(),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: isUserDrawn ? Colors.green : Colors.blue,
+                      child: Text(
+                        (_selectedRoomIndex + 1).toString(),
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              room['defaultName'] as String,
-                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                color: isUserDrawn ? Colors.green[800] : null,
-                              ),
+                          Text(
+                            room['defaultName'] as String,
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: isUserDrawn ? Colors.green[800] : Colors.white,
                             ),
                           ),
-                          if (isUserDrawn) ...[
-                            Icon(
-                              Icons.edit,
-                              size: 16,
-                              color: Colors.green[600],
+                          Text(
+                            'Detection Method: ${room['detectionMethod'] as String}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: isUserDrawn ? Colors.green[600] : Colors.white70,
                             ),
-                          ],
+                          ),
                         ],
                       ),
-                      Text(
-                        'Detection Method: ${room['detectionMethod'] as String}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isUserDrawn ? Colors.green[600] : null,
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Chip(
+                          label: Text('${((room['confidence'] as double) * 100).toStringAsFixed(0)}%'),
+                          backgroundColor: _getConfidenceColor(room['confidence'] as double).withOpacity(0.2),
+                          labelStyle: TextStyle(color: _getConfidenceColor(room['confidence'] as double)),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                Chip(
-                  label: Text('${((room['confidence'] as double) * 100).toStringAsFixed(0)}%'),
-                  backgroundColor: _getConfidenceColor(room['confidence'] as double).withOpacity(0.2),
-                  labelStyle: TextStyle(color: _getConfidenceColor(room['confidence'] as double)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-                         // Room description or user-drawn room details
-             if (isUserDrawn && room['roomData'] != null) ...[
-               Container(
-                 padding: const EdgeInsets.all(12),
-                 decoration: BoxDecoration(
-                   color: Colors.green.withOpacity(0.05),
-                   borderRadius: BorderRadius.circular(8),
-                   border: Border.all(color: Colors.green.withOpacity(0.2)),
-                 ),
-                 child: Column(
-                   crossAxisAlignment: CrossAxisAlignment.start,
-                   children: [
-                     Row(
-                       children: [
-                         Icon(Icons.person_outline, size: 16, color: Colors.green[600]),
-                         const SizedBox(width: 8),
-                         Text(
-                           'User-Drawn Room',
-                           style: TextStyle(
-              fontWeight: FontWeight.bold,
-                             color: Colors.green[800],
-                           ),
-                         ),
-                         const Spacer(),
-                         // Edit button for user rooms
-                         IconButton(
-                           onPressed: () => _toggleUserRoomEdit(room['id'] as String),
-                           icon: Icon(
-                             _isEditingUserRoom && _editingUserRoomId == room['id'] 
-                                 ? Icons.save 
-                                 : Icons.edit,
-                             size: 16,
-                             color: Colors.green[600],
-                           ),
-                           tooltip: _isEditingUserRoom && _editingUserRoomId == room['id'] 
-                               ? 'Save Changes' 
-                               : 'Edit Room',
-                           padding: EdgeInsets.zero,
-                           constraints: const BoxConstraints(),
-                         ),
-                       ],
-                     ),
-                     const SizedBox(height: 8),
-                     // Room name field (editable if in edit mode)
-                     _buildUserRoomNameField(room),
-                     const SizedBox(height: 8),
-                     // Room description field (editable if in edit mode)
-                     _buildUserRoomDescriptionField(room),
-                     const SizedBox(height: 8),
-                     ..._buildUserRoomDetails(room['roomData']),
-                   ],
-                 ),
-               ),
-             ] else ...[
-              Text(
-                room.containsKey('description') ? room['description'] as String : 'No description available',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
-          const SizedBox(height: 16),
-                         // Only show architectural elements for AI-detected rooms
-             if (!isUserDrawn) ...[
-               _buildArchitecturalElementsSection('Doors', (room['doors'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.door_front_door, Colors.orange),
-               _buildArchitecturalElementsSection('Windows', (room['windows'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.window, Colors.blue),
-               _buildArchitecturalElementsSection('Walls', (room['walls'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.wallpaper, Colors.grey),
-              if ((room['estimatedDimensions'] as Map<String, dynamic>).isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _buildDimensionsSection(room['estimatedDimensions'] as Map<String, double>),
-              ],
-              const SizedBox(height: 16),
-              _buildBoundariesSection(room['boundaries'] as Map<String, dynamic>),
-            ] else ...[
-              // Show message for user-drawn rooms
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withOpacity(0.2)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'User-drawn rooms don\'t have detailed architectural element detection. Use the AI detection results to identify doors, windows, and walls.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[600],
-                          fontStyle: FontStyle.italic,
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () => _editRoomInfo('room_details'),
+                          icon: Icon(Icons.edit, color: Colors.white70, size: 18),
+                          tooltip: 'Edit Room Information',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
-              ),
-            ],
-            // Add this in the room details section, after the architectural elements
-            // Add a new section for wall thickness analysis
-            const SizedBox(height: 16),
-            _buildWallThicknessAnalysisSection(room),
-          ],
+                const SizedBox(height: 16),
+                if (isUserDrawn && room['roomData'] != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.withOpacity(0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.person_outline, size: 16, color: Colors.green[600]),
+                            const SizedBox(width: 8),
+                            Text(
+                              'User-Drawn Room',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[800],
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              onPressed: () => _toggleUserRoomEdit(room['id'] as String),
+                              icon: Icon(
+                                _isEditingUserRoom && _editingUserRoomId == room['id'] 
+                                    ? Icons.save 
+                                    : Icons.edit,
+                                size: 16,
+                                color: Colors.green[600],
+                              ),
+                              tooltip: _isEditingUserRoom && _editingUserRoomId == room['id'] 
+                                  ? 'Save Changes' 
+                                  : 'Edit Room',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _buildUserRoomNameField(room),
+                        const SizedBox(height: 8),
+                        _buildUserRoomDescriptionField(room),
+                        const SizedBox(height: 8),
+                        ..._buildUserRoomDetails(room['roomData']),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Text(
+                    room.containsKey('description') ? room['description'] as String : 'No description available',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (!isUserDrawn) ...[
+                  _buildArchitecturalElementsSection('Doors', (room['doors'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.door_front_door, Colors.orange),
+                  _buildArchitecturalElementsSection('Windows', (room['windows'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.window, Colors.blue),
+                  _buildArchitecturalElementsSection('Walls', (room['walls'] as List<dynamic>).cast<ArchitecturalElement>(), Icons.wallpaper, Colors.grey),
+                  if ((room['estimatedDimensions'] as Map<String, dynamic>).isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildDimensionsSection(room['estimatedDimensions'] as Map<String, double>),
+                  ],
+                  // const SizedBox(height: 16),
+                  // _buildBoundariesSection(room['boundaries'] as Map<String, dynamic>),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'User-drawn rooms don\'t have detailed architectural element detection. Use the AI detection results to identify doors, windows, and walls.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blue[600],
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _buildWallThicknessAnalysisSection(room),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -3194,29 +2298,65 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
   ) {
     if (elements.isEmpty) return const SizedBox.shrink();
     
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: color),
-            const SizedBox(width: 8),
-            Text(
-              '$title (${elements.length})',
-              style: Theme.of(context).textTheme.titleMedium,
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: color, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AutoSizeText(
+                        '$title (${elements.length})',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        minFontSize: 12,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ...elements.map((element) => _buildElementCard(element, color)),
+              ],
             ),
-          ],
+          ),
         ),
-        const SizedBox(height: 8),
-        ...elements.map((element) => _buildElementCard(element, color)),
-        const SizedBox(height: 12),
-      ],
+      ),
     );
   }
 
   Widget _buildElementCard(ArchitecturalElement element, Color color) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.15), width: 1),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -3226,28 +2366,44 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
               children: [
                 Icon(Icons.circle, size: 8, color: color),
                 const SizedBox(width: 8),
-                Text(
-                  element.type,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                Expanded(
+                  child: AutoSizeText(
+                    element.type,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    maxLines: 1,
+                    minFontSize: 10,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                const Spacer(),
-                Text(
+                AutoSizeText(
                   '${(element.confidence * 100).toStringAsFixed(0)}%',
                   style: TextStyle(
                     color: _getConfidenceColor(element.confidence),
                     fontSize: 12,
+                    fontWeight: FontWeight.bold,
                   ),
+                  maxLines: 1,
+                  minFontSize: 8,
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(
+            AutoSizeText(
               'Position: ${element.relativePosition}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              maxLines: 1,
+              minFontSize: 8,
+              overflow: TextOverflow.ellipsis,
             ),
-            Text(
+            AutoSizeText(
               'Size: ${element.dimensions['width']} × ${element.dimensions['height']} px',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              maxLines: 1,
+              minFontSize: 8,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -3256,1134 +2412,93 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
   }
 
   Widget _buildDimensionsSection(Map<String, double> dimensions) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.straighten, color: Colors.green),
-            const SizedBox(width: 8),
-            Text(
-              'Estimated Dimensions',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ...dimensions.entries.map((entry) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: Row(
-            children: [
-              Text('${entry.key}: '),
-              Text(
-                '${entry.value.toStringAsFixed(2)} m',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        )),
-      ],
-    );
-  }
-
-  Widget _buildBoundariesSection(Map<String, dynamic> boundaries) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.border_all, color: Colors.purple),
-            const SizedBox(width: 8),
-            Text(
-              'Room Boundaries',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Top: ${boundaries['top'] ?? 'N/A'}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        Text(
-          'Left: ${boundaries['left'] ?? 'N/A'}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        Text(
-          'Bottom: ${boundaries['bottom'] ?? 'N/A'}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        Text(
-          'Right: ${boundaries['right'] ?? 'N/A'}',
-          style: const TextStyle(fontSize: 12),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.all(16.0),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.grey.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, -2),
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: _performSafetyAssessment,
-              icon: const Icon(Icons.security),
-              label: const Text('Safety Assessment'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12.0),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RiskAssessmentScreen(
-                      detectionResult: _result,
-                      userAnnotations: _userAnnotations,
-                      selectedHouseMaterials: _selectedHouseMaterials,
-                      houseBoundaryPoints: _houseBoundaryPoints,
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.analytics),
-              label: const Text('Risk Analysis'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red[700],
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12.0),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RoomSafetyAssessmentScreen(
-                      rooms: _result.detectedRooms.map((room) => {
-                        'id': room.roomId,
-                        'name': room.defaultName,
-                        'type': room.defaultName?.toLowerCase() ?? 'room',
-                        'description': room.description,
-                        'confidence': room.confidence,
-                      }).toList(),
-                      annotationId: 'enhanced_detection_${DateTime.now().millisecondsSinceEpoch}',
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.home_work),
-              label: const Text('Room Safety'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12.0),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _performSafetyAssessment() {
-    print('\n\n🔥 ===== SAFETY ASSESSMENT DATA DUMP =====');
-    print('📊 Printing all user-logged and AI auto-detected data:');
-    
-    // 1. Print raw detection result data
-    print('\n📋 1. RAW DETECTION RESULT DATA:');
-    print('   Keys available: ${widget.detectionResult.keys.toList()}');
-    widget.detectionResult.forEach((key, value) {
-      if (value is List) {
-        print('   $key: List with ${value.length} items');
-        if (value.isNotEmpty && value.first is Map) {
-          print('     Sample item keys: ${(value.first as Map).keys.toList()}');
-          for (int i = 0; i < value.length; i++) {
-            if (value[i] is Map) {
-              print('     Item $i: ${value[i]}');
-            }
-          }
-        }
-      } else if (value is Map) {
-        print('   $key: Map with keys: ${value.keys.toList()}');
-        print('     Full data: $value');
-      } else {
-        String displayValue = value.toString();
-        if (displayValue.length > 100) {
-          displayValue = displayValue.substring(0, 100) + '... (${displayValue.length} chars total)';
-        }
-        print('   $key: ${value.runtimeType} - $displayValue');
-      }
-    });
-    
-    // 2. Print AI auto-detected rooms
-    print('\n🏠 2. AI AUTO-DETECTED ROOMS (${_result.detectedRooms.length} rooms):');
-    for (int i = 0; i < _result.detectedRooms.length; i++) {
-      final room = _result.detectedRooms[i];
-      print('   Room $i Details:');
-      print('     • Room ID: ${room.roomId}');
-      print('     • Default Name: ${room.defaultName}');
-      print('     • Description: ${room.description}');
-           print('     • Estimated Dimensions: ${room.estimatedDimensions}');
-     print('     • Boundaries: ${room.boundaries}');
-     print('     • Detection Method: ${room.detectionMethod}');
-      print('     • Doors: ${room.doors.length} doors');
-             for (int j = 0; j < room.doors.length; j++) {
-         final door = room.doors[j];
-         print('       Door $j: Type=${door.type}, Confidence=${door.confidence}, Center=${door.center}, BBox=${door.bbox}');
-       }
-       print('     • Windows: ${room.windows.length} windows');
-       for (int j = 0; j < room.windows.length; j++) {
-         final window = room.windows[j];
-         print('       Window $j: Type=${window.type}, Confidence=${window.confidence}, Center=${window.center}, BBox=${window.bbox}');
-       }
-       print('     • Walls: ${room.walls.length} walls');
-       for (int j = 0; j < room.walls.length; j++) {
-         final wall = room.walls[j];
-         print('       Wall $j: Type=${wall.type}, Confidence=${wall.confidence}, Center=${wall.center}, BBox=${wall.bbox}');
-       }
-      print('');
-    }
-    
-    // 3. Print architectural elements
-    print('\n🏗️ 3. AI AUTO-DETECTED ARCHITECTURAL ELEMENTS (${_result.architecturalElements.length} elements):');
-    for (int i = 0; i < _result.architecturalElements.length; i++) {
-      final element = _result.architecturalElements[i];
-      print('   Element $i Details:');
-      print('     • Type: ${element.type}');
-      print('     • Confidence: ${element.confidence}');
-      print('     • Center: ${element.center}');
-      print('     • Dimensions: ${element.dimensions}');
-      print('     • Bounding Box: ${element.bbox}');
-      print('     • Area: ${element.area}');
-      print('     • Relative Position: ${element.relativePosition}');
-      print('');
-    }
-    
-    // 4. Print user annotations
-    print('\n✏️ 4. USER ANNOTATIONS (${_userAnnotations.length} annotations):');
-    for (int i = 0; i < _userAnnotations.length; i++) {
-      final annotation = _userAnnotations[i];
-      print('   Annotation $i Details:');
-      print('     • Tool: ${annotation['tool']}');
-      print('     • Color: ${Color(annotation['color'] as int)}');
-      print('     • Stroke Width: ${annotation['strokeWidth']}');
-      print('     • Timestamp: ${annotation['timestamp']}');
-      print('     • Points Count: ${(annotation['points'] as List).length}');
-      print('     • Raw Data: $annotation');
-      print('');
-    }
-    
-    // 5. Print house boundary data
-    print('\n🏡 5. HOUSE BOUNDARY DATA:');
-    print('   • Has House Boundary: $_hasHouseBoundary');
-    print('   • Is Drawing House Boundary: $_isDrawingHouseBoundary');
-    print('   • Boundary Points Count: ${_houseBoundaryPoints.length}');
-    for (int i = 0; i < _houseBoundaryPoints.length; i++) {
-      print('     Point $i: ${_houseBoundaryPoints[i]}');
-    }
-    
-    // 6. Print house materials data
-    print('\n🧱 6. SELECTED HOUSE MATERIALS:');
-    print('   • Materials Count: ${_selectedHouseMaterials.length}');
-    _selectedHouseMaterials.forEach((material, percentage) {
-      print('     • $material: $percentage%');
-    });
-    
-    // 7. Print processing information
-    print('\n⚙️ 7. PROCESSING INFORMATION:');
-    print('   • Processing Method: ${_result.processingMethod}');
-    print('   • Has Annotated Image: ${_result.annotatedImageBase64 != null}');
-    print('   • Has SAM Visualization: ${_result.samVisualization != null}');
-    print('   • Has Original Image: ${_result.originalImageBase64 != null}');
-    print('   • Has Individual Visualizations: ${_result.individualVisualizations != null}');
-    if (_result.individualVisualizations != null) {
-      print('   • Individual Viz Keys: ${_result.individualVisualizations!.keys.toList()}');
-    }
-    
-    // 8. Print room controllers data (user-edited room information)
-    print('\n📝 8. USER-EDITED ROOM INFORMATION:');
-    _roomNameControllers.forEach((index, controller) {
-      print('   Room $index:');
-      print('     • Name: ${controller.text}');
-      print('     • Description: ${_roomDescControllers[index]?.text ?? 'N/A'}');
-    });
-    
-    // 9. Print user room controllers data
-    print('\n👤 9. USER-CREATED ROOM INFORMATION:');
-    _userRoomNameControllers.forEach((roomId, controller) {
-      print('   User Room $roomId:');
-      print('     • Name: ${controller.text}');
-      print('     • Description: ${_userRoomDescControllers[roomId]?.text ?? 'N/A'}');
-    });
-    
-    // 10. Print current drawing state
-    print('\n🎨 10. CURRENT DRAWING STATE:');
-    print('   • Is Annotation Mode: $_isAnnotationMode');
-    print('   • Current Drawing Tool: $_currentDrawingTool');
-    print('   • Current Drawing Color: $_currentDrawingColor');
-    print('   • Stroke Width: $_strokeWidth');
-    print('   • Has Unsaved Annotations: $_hasUnsavedAnnotations');
-    print('   • Is Currently Drawing: $_isCurrentlyDrawing');
-    print('   • Show Original Image: $_showOriginalImage');
-    print('   • Selected Room Type: $_selectedRoomType');
-    
-    print('\n🔥 ===== END SAFETY ASSESSMENT DATA DUMP =====\n\n');
-    
-    // Perform explosive risk assessment
-    _performExplosiveRiskAssessment();
-    
-    // Also show a dialog with summary information
-    _showSafetyAssessmentDialog();
-  }
-
-  void _showSafetyAssessmentDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.security, color: Colors.orange),
-              const SizedBox(width: 8),
-              const Text('Safety Assessment Complete'),
-            ],
-          ),
-          content: SingleChildScrollView(
-      child: Column(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-                  'Data Summary:',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-                const SizedBox(height: 12),
-                _buildDataSummaryItem('AI Detected Rooms', '${_result.detectedRooms.length}'),
-                _buildDataSummaryItem('Architectural Elements', '${_result.architecturalElements.length}'),
-                _buildDataSummaryItem('User Annotations', '${_userAnnotations.length}'),
-                _buildDataSummaryItem('House Boundary Points', '${_houseBoundaryPoints.length}'),
-                _buildDataSummaryItem('Selected Materials', '${_selectedHouseMaterials.length}'),
-                _buildDataSummaryItem('Processing Method', _result.processingMethod ?? 'Unknown'),
-                const SizedBox(height: 8),
-                const Divider(),
-                const SizedBox(height: 8),
-                Text(
-                  'Risk Assessment:',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red[700],
-                  ),
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.straighten, color: Colors.green, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AutoSizeText(
+                        'Estimated Dimensions',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        minFontSize: 12,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                _buildDataSummaryItem('MAMAD Protection', '${_userAnnotations.where((a) => a['tool'] == 'mamad').length} detected'),
-                _buildDataSummaryItem('Entry Points', '${_result.architecturalElements.where((e) => e.type.toLowerCase() == 'door').length} doors'),
-                _buildDataSummaryItem('Windows', '${_result.architecturalElements.where((e) => e.type.toLowerCase() == 'window').length} windows'),
-          const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
+                const SizedBox(height: 12),
+                ...dimensions.entries.map((entry) => Container(
+                  margin: const EdgeInsets.symmetric(vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
+                    color: Colors.white.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withOpacity(0.15), width: 1),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
-                      const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          'Complete safety assessment with explosive risk analysis has been performed. All detailed data and risk calculations have been printed to the console. Check your debug logs for comprehensive information including risk scores, evacuation recommendations, and safety measures.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue[600],
+                        flex: 2,
+                        child: AutoSizeText(
+                          '${entry.key}: ',
+                          style: const TextStyle(color: Colors.white70, fontSize: 14),
+                          maxLines: 1,
+                          minFontSize: 10,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: AutoSizeText(
+                          '${entry.value.toStringAsFixed(2)} m',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 14,
                           ),
+                          maxLines: 1,
+                          minFontSize: 10,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                ),
+                )),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _exportDataToFile();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Export Data'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildDataSummaryItem(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w500),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(color: Colors.grey[700]),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  void _performExplosiveRiskAssessment() {
-    print('\n\n💥 ===== EXPLOSIVE RISK ASSESSMENT =====');
-    print('🎯 Performing comprehensive risk analysis using AI and user data:');
-    
-    try {
-      // Create risk calculator with current data
-      final riskCalculator = ExplosiveRiskCalculator(
-        rooms: _result.detectedRooms,
-        elements: _result.architecturalElements,
-        userAnnotations: _userAnnotations,
-        imageDimensions: _result.imageDimensions,
-      );
-      
-      // Test specific high-risk points based on detected rooms and elements
-      final List<Map<String, dynamic>> testPoints = [];
-      
-      // Add door locations as test points (high risk)
-      for (int i = 0; i < _result.architecturalElements.length; i++) {
-        final element = _result.architecturalElements[i];
-        if (element.type.toLowerCase() == 'door') {
-          testPoints.add({
-            'x': (element.center['x'] ?? 0).toDouble(),
-            'y': (element.center['y'] ?? 0).toDouble(),
-            'name': 'Door Area ${i + 1}',
-            'type': 'entry_point'
-          });
-        }
-      }
-      
-      // Add room centers as test points
-      for (int i = 0; i < _result.detectedRooms.length; i++) {
-        final room = _result.detectedRooms[i];
-        final bounds = room.boundaries;
-        if (bounds.containsKey('x') && bounds.containsKey('y') && 
-            bounds.containsKey('width') && bounds.containsKey('height')) {
-          final centerX = (bounds['x'] as num).toDouble() + (bounds['width'] as num).toDouble() / 2;
-          final centerY = (bounds['y'] as num).toDouble() + (bounds['height'] as num).toDouble() / 2;
-          
-          testPoints.add({
-            'x': centerX,
-            'y': centerY,
-            'name': room.defaultName ?? 'Room ${i + 1}',
-            'type': 'room_center'
-          });
-        }
-      }
-      
-      // Add MAMAD locations as test points (should be low risk)
-      final mamadLocations = riskCalculator.getMAMADLocations();
-      for (int i = 0; i < mamadLocations.length; i++) {
-        final mamad = mamadLocations[i];
-        testPoints.add({
-          'x': mamad['x'],
-          'y': mamad['y'],
-          'name': 'MAMAD ${i + 1}',
-          'type': 'safe_room'
-        });
-      }
-      
-      print('\n📊 RISK ASSESSMENT RESULTS:');
-      print('==========================');
-      
-      double totalRisk = 0;
-      int criticalPoints = 0;
-      int highRiskPoints = 0;
-      int mediumRiskPoints = 0;
-      int lowRiskPoints = 0;
-      int minimalRiskPoints = 0;
-      
-      for (Map<String, dynamic> point in testPoints) {
-        final double x = point['x'];
-        final double y = point['y'];
-        final String name = point['name'];
-        final String type = point['type'];
-        
-        final double risk = riskCalculator.calculateRiskScore(x, y);
-        final String level = riskCalculator.getRiskLevel(risk);
-        final String evacuation = riskCalculator.getEvacuationRecommendations(x, y);
-        
-        totalRisk += risk;
-        
-        switch (level) {
-          case 'CRITICAL':
-            criticalPoints++;
-            break;
-          case 'HIGH':
-            highRiskPoints++;
-            break;
-          case 'MEDIUM':
-            mediumRiskPoints++;
-            break;
-          case 'LOW':
-            lowRiskPoints++;
-            break;
-          case 'MINIMAL':
-            minimalRiskPoints++;
-            break;
-        }
-        
-        print('\n🎯 Location: $name (${x.round()}, ${y.round()})');
-        print('   Type: $type');
-        print('   Risk Score: ${risk.toStringAsFixed(3)}');
-        print('   Risk Level: $level ${_getRiskEmoji(level)}');
-        print('   Evacuation: $evacuation');
-      }
-      
-      // Generate explosion scenarios
-      final scenarios = riskCalculator.generateDefaultExplosionScenarios();
-      print('\n💣 EXPLOSION SCENARIOS (${scenarios.length} scenarios):');
-      print('====================================');
-      
-      for (int i = 0; i < scenarios.length; i++) {
-        final scenario = scenarios[i];
-        print('   Scenario ${i + 1}:');
-        print('     Location: (${scenario.x.round()}, ${scenario.y.round()})');
-        print('     Intensity: ${scenario.intensity.toStringAsFixed(2)}');
-        print('     Probability: ${(scenario.probability * 100).toStringAsFixed(1)}%');
-        print('     Description: ${scenario.description}');
-        print('');
-      }
-      
-      // Overall assessment summary
-      final double averageRisk = testPoints.isNotEmpty ? totalRisk / testPoints.length : 0;
-      print('\n📈 OVERALL ASSESSMENT SUMMARY:');
-      print('==============================');
-      print('   Total Test Points: ${testPoints.length}');
-      print('   Average Risk Score: ${averageRisk.toStringAsFixed(3)}');
-      print('   Overall Risk Level: ${riskCalculator.getRiskLevel(averageRisk)} ${_getRiskEmoji(riskCalculator.getRiskLevel(averageRisk))}');
-      print('   Critical Risk Points: $criticalPoints 🔴');
-      print('   High Risk Points: $highRiskPoints 🟠');
-      print('   Medium Risk Points: $mediumRiskPoints 🟡');
-      print('   Low Risk Points: $lowRiskPoints 🟢');
-      print('   Minimal Risk Points: $minimalRiskPoints ⚪');
-      
-      // MAMAD effectiveness analysis
-      print('\n🛡️ MAMAD PROTECTION ANALYSIS:');
-      print('============================');
-      print('   MAMAD Locations Detected: ${mamadLocations.length}');
-      if (mamadLocations.isNotEmpty) {
-        print('   MAMAD Coverage: Available ✅');
-        for (int i = 0; i < mamadLocations.length; i++) {
-          final mamad = mamadLocations[i];
-          print('     MAMAD ${i + 1}: (${mamad['x']!.round()}, ${mamad['y']!.round()})');
-        }
-      } else {
-        print('   MAMAD Coverage: Not Available ❌');
-        print('   Recommendation: Consider adding MAMAD protection');
-      }
-      
-      // Recommendations
-      print('\n🎯 SAFETY RECOMMENDATIONS:');
-      print('==========================');
-      
-      if (criticalPoints > 0) {
-        print('   ⚠️ URGENT: $criticalPoints critical risk areas detected!');
-        print('   → Immediate safety measures required');
-        print('   → Consider structural reinforcement');
-        print('   → Install additional MAMAD protection');
-      }
-      
-      if (highRiskPoints > 0) {
-        print('   ⚠️ WARNING: $highRiskPoints high risk areas detected');
-        print('   → Enhanced security measures recommended');
-        print('   → Clear evacuation routes');
-      }
-      
-      if (mamadLocations.isEmpty) {
-        print('   🛡️ No MAMAD protection detected');
-        print('   → Consider installing protected space');
-        print('   → Ensure compliance with Israeli safety standards');
-      }
-      
-      final doorCount = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'door').length;
-      final windowCount = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'window').length;
-      
-      print('   🚪 Entry Points Analysis:');
-      print('     Doors: $doorCount');
-      print('     Windows: $windowCount');
-      print('     → Secure all entry points');
-      print('     → Monitor high-traffic areas');
-      
-    } catch (e) {
-      print('❌ Error performing risk assessment: $e');
-    }
-    
-    print('\n💥 ===== END EXPLOSIVE RISK ASSESSMENT =====\n\n');
-  }
-  
-  String _getRiskEmoji(String riskLevel) {
-    switch (riskLevel) {
-      case 'CRITICAL':
-        return '🔴';
-      case 'HIGH':
-        return '🟠';
-      case 'MEDIUM':
-        return '🟡';
-      case 'LOW':
-        return '🟢';
-      case 'MINIMAL':
-        return '⚪';
-      default:
-        return '❓';
-    }
-  }
-
-  Widget _buildRiskHeatmapView() {
-    if (_result.originalImageBase64 == null) {
-      return const Center(
-        child: Text('Original image not available for risk heatmap'),
-      );
-    }
-
-    return Column(
-      children: [
-        // Header section
-        Container(
-          padding: const EdgeInsets.all(16.0),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.red.withOpacity(0.1), Colors.orange.withOpacity(0.1)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-      ),
-      child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.security, color: Colors.red[700], size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-                          'Explosive Risk Heatmap',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-                            color: Colors.red[800],
-                          ),
-                        ),
-                        Text(
-                          'AI-powered risk assessment overlay on your floor plan',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Refresh button with indicator for cache status
-                  Stack(
-                    children: [
-                      IconButton(
-                        onPressed: _refreshRiskHeatmap,
-                        icon: Icon(Icons.refresh, color: Colors.red[700]),
-                        tooltip: _cachedRiskGrid == null 
-                            ? 'Risk data needs refresh (new annotations detected)'
-                            : 'Refresh Risk Calculation',
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.red.withOpacity(0.1),
-                          padding: const EdgeInsets.all(12),
-                        ),
-                      ),
-                      // Show indicator when cache is invalid
-                      if (_cachedRiskGrid == null)
-                        Positioned(
-                          right: 8,
-                          top: 8,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: Colors.orange,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        
-        // Risk legend
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildRiskLegendItem('CRITICAL', Colors.red, '0.8-1.0'),
-              _buildRiskLegendItem('HIGH', Colors.orange, '0.6-0.8'),
-              _buildRiskLegendItem('MEDIUM', Colors.yellow, '0.4-0.6'),
-              _buildRiskLegendItem('LOW', Colors.green, '0.2-0.4'),
-              _buildRiskLegendItem('MINIMAL', Colors.grey, '0-0.2'),
-            ],
-          ),
-        ),
-        
-        const Divider(),
-        
-        // Risk heatmap display
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox.expand(
-                  child: _buildRiskHeatmapWidget(),
-                ),
-              ),
-            ),
-          ),
-        ),
-        
-        // Instructions
-        Container(
-          padding: const EdgeInsets.all(16.0),
-          decoration: BoxDecoration(
-            color: Colors.red.withOpacity(0.05),
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade300),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: Colors.red[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Each point represents the calculated explosive risk level at that location. Risk factors include proximity to entry points, room type, structural protection, and MAMAD coverage.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.red[600],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.lightbulb_outline, size: 16, color: Colors.orange[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Red areas indicate high-risk zones that may require additional security measures. Green areas near MAMAD locations show effective protection coverage.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.orange[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRiskLegendItem(String label, Color color, String scoreRange) {
-    return Column(
-      children: [
-        Container(
-          width: 20,
-          height: 20,
-      decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.black26),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-        ),
-        Text(
-          scoreRange,
-          style: TextStyle(fontSize: 8, color: Colors.grey[600]),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRiskHeatmapWidget() {
-    return FutureBuilder<List<List<RiskGridPoint>>>(
-      key: ValueKey(_riskHeatmapRefreshKey), // Force rebuild when refresh key changes
-      future: _generateRiskGridCached(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 60,
-                  height: 60,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 6,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.red[600]!),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Calculating Risk Assessment...',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red[700],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Analyzing ${_result.detectedRooms.length} rooms and ${_result.architecturalElements.length} elements',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-        
-        if (snapshot.hasError) {
-          return Center(
-      child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-                Icon(Icons.error, color: Colors.red, size: 48),
-                const SizedBox(height: 16),
-                Text('Error generating risk heatmap: ${snapshot.error}'),
-              ],
-            ),
-          );
-        }
-        
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(
-            child: Text('No risk data available'),
-          );
-        }
-        
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth.isInfinite || constraints.maxHeight.isInfinite) {
-              return const Center(
-                child: Text('Cannot render risk heatmap: Invalid container size'),
-              );
-            }
-            
-            // Decode the image using the existing helper function
-            final imageBytes = _decodeBase64Image(_result.originalImageBase64!);
-            
-            // Check if image decoding failed
-            if (imageBytes.isEmpty) {
-              return const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.error, color: Colors.red, size: 48),
-                    SizedBox(height: 16),
-                    Text('Failed to decode image for risk heatmap'),
-                  ],
-                ),
-              );
-            }
-            
-            return SizedBox(
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
-              child: Stack(
-                children: [
-                  // Original floor plan image as background (without annotations)
-                  RepaintBoundary(
-                    child: Container(
-                      width: constraints.maxWidth,
-                      height: constraints.maxHeight,
-                      child: Image.memory(
-                        imageBytes,
-                        fit: BoxFit.contain,
-                        alignment: Alignment.center,
-                      ),
-                    ),
-                  ),
-                  // Risk grid overlay - positioned to match image exactly
-                  SizedBox(
-                    width: constraints.maxWidth,
-                    height: constraints.maxHeight,
-                    child: CustomPaint(
-                      painter: RiskHeatmapPainter(
-                        riskGrid: snapshot.data!,
-                        imageWidth: (_result.imageDimensions['width'] ?? 800).toDouble(),
-                        imageHeight: (_result.imageDimensions['height'] ?? 600).toDouble(),
-                        containerWidth: constraints.maxWidth,
-                        containerHeight: constraints.maxHeight,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _refreshRiskHeatmap() {
-    setState(() {
-      _riskHeatmapRefreshKey++;
-      _cachedRiskGrid = null; // Clear cache to force regeneration
-    });
-    
-    // Show detailed feedback to the user
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.refresh, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                const Text('Refreshing Risk Assessment...', 
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 4),
-          Text(
-              '• Recalculating explosion scenarios\n• Updating risk grid (${_result.detectedRooms.length} rooms, ${_result.architecturalElements.length} elements)\n• Applying current annotations and MAMAD protection',
-              style: const TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
-        backgroundColor: Colors.red[600],
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-    
-    print('🔄 Risk heatmap refresh triggered (key: $_riskHeatmapRefreshKey)');
-    
-    // Show performance feedback
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('🚀 Optimized calculations - using ${_cachedRiskGrid != null ? 'cached' : 'fresh'} data'),
-        backgroundColor: Colors.green[600],
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
-
-  Future<List<List<RiskGridPoint>>> _generateRiskGridCached() async {
-    // Return cached result if available and not refreshing
-    if (_cachedRiskGrid != null && !_isRiskGridGenerating) {
-      print('🚀 Using cached risk grid for better performance (${_cachedRiskGrid!.length} rows)');
-      return _cachedRiskGrid!;
-    }
-    
-    // Generate new grid
-    _isRiskGridGenerating = true;
-    try {
-      print('🔄 Generating fresh risk grid (annotations: ${_userAnnotations.length})');
-      final result = await _generateRiskGrid();
-      _cachedRiskGrid = result;
-      return result;
-    } finally {
-      _isRiskGridGenerating = false;
-    }
-  }
-
-  Future<List<List<RiskGridPoint>>> _generateRiskGrid() async {
-    // Run the risk calculation in a separate isolate to avoid blocking UI
-    return await Future.delayed(const Duration(milliseconds: 100), () {
-      try {
-        final riskCalculator = ExplosiveRiskCalculator(
-          rooms: _result.detectedRooms,
-          elements: _result.architecturalElements,
-          userAnnotations: _userAnnotations,
-          imageDimensions: _result.imageDimensions,
-        );
-        
-        final List<List<RiskGridPoint>> grid = [];
-        final int width = _result.imageDimensions['width'] ?? 800;
-        final int height = _result.imageDimensions['height'] ?? 600;
-        
-        // Optimize grid size for performance - less dense but faster
-        final int gridSize = math.max(15, math.min(width, height) ~/ 40); // Larger grid size for better performance
-        
-        // Minimal logging for performance
-        print('🔥 Generating risk grid: ${width}x${height}, grid size: $gridSize');
-        
-        final doors = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'door').toList();
-        final windows = _result.architecturalElements.where((e) => e.type.toLowerCase() == 'window').toList();
-        print('🏗️ Elements: ${_result.architecturalElements.length} total, ${doors.length} doors, ${windows.length} windows');
-        
-        final scenarios = riskCalculator.generateDefaultExplosionScenarios();
-        print('💥 Generated ${scenarios.length} explosion scenarios');
-        
-        for (int y = 0; y < height; y += gridSize) {
-          final List<RiskGridPoint> row = [];
-          for (int x = 0; x < width; x += gridSize) {
-            final double riskScore = riskCalculator.calculateRiskScore(x.toDouble(), y.toDouble());
-            final String riskLevel = riskCalculator.getRiskLevel(riskScore, x: x.toDouble(), y: y.toDouble());
-            final Color pointColor = _getRiskColor(riskLevel);
-            
-            row.add(RiskGridPoint(
-              x: x.toDouble(),
-              y: y.toDouble(),
-              riskScore: riskScore,
-              riskLevel: riskLevel,
-              color: pointColor,
-            ));
-          }
-          grid.add(row);
-        }
-        
-        // Debug: Print risk statistics
-        final allPoints = grid.expand((row) => row).toList();
-        final criticalPoints = allPoints.where((p) => p.riskLevel == 'CRITICAL').length;
-        final highPoints = allPoints.where((p) => p.riskLevel == 'HIGH').length;
-        final mediumPoints = allPoints.where((p) => p.riskLevel == 'MEDIUM').length;
-        final lowPoints = allPoints.where((p) => p.riskLevel == 'LOW').length;
-        final minimalPoints = allPoints.where((p) => p.riskLevel == 'MINIMAL').length;
-        
-        // Count points inside MAMAD areas
-        final mamadPoints = allPoints.where((p) => riskCalculator.isPointInsideMAMAD(p.x, p.y)).length;
-        
-        // Debug: Check some specific points for MAMAD protection
-        if (mamadPoints == 0 && riskCalculator.getMAMADLocations().isNotEmpty) {
-          print('⚠️ No points detected inside MAMAD but MAMAD locations exist. Checking sample points...');
-          final samplePoints = allPoints.take(10).toList();
-          for (var point in samplePoints) {
-            final isInside = riskCalculator.isPointInsideMAMAD(point.x, point.y);
-            print('   Point (${point.x.round()}, ${point.y.round()}): inside MAMAD = $isInside, risk = ${point.riskScore.toStringAsFixed(3)}, level = ${point.riskLevel}');
-          }
-        }
-        
-        print('🔥 Risk grid generated: ${grid.length} rows, ${grid.isNotEmpty ? grid.first.length : 0} cols');
-        print('📊 Risk distribution: Critical=$criticalPoints, High=$highPoints, Medium=$mediumPoints, Low=$lowPoints, Minimal=$minimalPoints');
-        print('🔒 MAMAD protection: $mamadPoints points inside MAMAD areas (ultra-safe zones)');
-        
-        return grid;
-      } catch (e) {
-        print('❌ Error generating risk grid: $e');
-        rethrow;
-      }
-    });
-  }
-
-  Color _getRiskColor(String riskLevel) {
-    Color color;
-    switch (riskLevel) {
-      case 'CRITICAL':
-        color = Colors.red;
-        break;
-      case 'HIGH':
-        color = Colors.orange;
-        break;
-      case 'MEDIUM':
-        color = Colors.yellow;
-        break;
-      case 'LOW':
-        color = Colors.green;
-        break;
-      case 'MINIMAL':
-        color = Colors.grey;
-        break;
-      default:
-        color = Colors.blue;
-        break;
-    }
-    return color;
-  }
-
-  void _exportDataToFile() {
-    // This would typically save to a file, but for now we'll show the option
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Data export functionality would be implemented here'),
-        backgroundColor: Colors.blue,
-      ),
-    );
-  }
 
   void _showAnalysisInfo() {
     showDialog(
@@ -4432,410 +2547,12 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     );
   }
 
-  List<Map<String, dynamic>> _convertArchitecturalElements(dynamic elements) {
-    if (elements == null) return [];
-    
-    if (elements is List) {
-      return elements.map<Map<String, dynamic>>((e) {
-        if (e is Map<String, dynamic>) {
-          return {
-            'type': e['type']?.toString() ?? 'unknown',
-            'confidence': (e['confidence'] is num) ? e['confidence'].toDouble() : 0.0,
-            'position': e['position'] ?? e['relativePosition'] ?? {},
-          };
-        } else {
-          // Handle ArchitecturalElement objects
-          return {
-            'type': e.type?.toString() ?? 'unknown',
-            'confidence': (e.confidence is num) ? e.confidence.toDouble() : 0.0,
-            'position': e.relativePosition ?? {},
-          };
-        }
-      }).toList();
-    } else if (elements is Map) {
-      // If it's a Map, convert it to a single-item list
-      return [{
-        'type': elements['type']?.toString() ?? 'unknown',
-        'confidence': (elements['confidence'] is num) ? elements['confidence'].toDouble() : 0.0,
-        'position': elements['position'] ?? elements['relativePosition'] ?? {},
-      }];
-    }
-    
-    return [];
-  }
-
-  int _getSafeListLength(dynamic list) {
-    if (list == null) return 0;
-    if (list is List) return list.length;
-    if (list is Map) return 1; // Treat single map as one item
-    return 0;
-  }
-
-  void _proceedToSafetyAssessment() {
-    List<Map<String, dynamic>> roomsForSafety;
-    
-    try {
-      print('🔍 Starting safety assessment navigation...');
-      print('   Detected rooms count: ${_result.detectedRooms.length}');
-      
-      // Convert enhanced results to the format expected by safety assessment
-      roomsForSafety = _result.detectedRooms.asMap().entries.map((entry) {
-        final index = entry.key;
-        final room = entry.value;
-        
-        print('   Processing room $index: ${room.roomId}');
-        
-        return {
-          'id': room.roomId ?? 'room_$index',
-          'name': (room.defaultName?.isNotEmpty == true) ? room.defaultName : 'Room ${index + 1}',
-          'type': (room.defaultName?.isNotEmpty == true) ? room.defaultName!.toLowerCase() : 'room',
-          'confidence': room.confidence ?? 0.0,
-          'doors': _getSafeListLength(room.doors),
-          'windows': _getSafeListLength(room.windows),
-          'walls': _getSafeListLength(room.walls),
-          'description': room.description ?? '',
-          'boundaries': room.boundaries ?? [],
-          'architectural_elements': _convertArchitecturalElements(room.architecturalElements),
-        };
-      }).toList();
-      
-      print('   Converted ${roomsForSafety.length} rooms for safety assessment');
-      
-      if (roomsForSafety.isEmpty) {
-        print('⚠️ No rooms found for safety assessment');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No rooms detected for safety assessment')),
-        );
-        return;
-      }
-    } catch (e) {
-      print('❌ Error in room conversion: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error preparing room data: $e')),
-      );
-      return;
-    }
-
-    // Convert all architectural elements from the detection results
-    final architecturalElements = _result.architecturalElements.map((element) => {
-      'type': element.type,
-      'confidence': element.confidence,
-      'x': element.center['x']?.toDouble() ?? 0.0,
-      'y': element.center['y']?.toDouble() ?? 0.0,
-      'width': element.dimensions['width']?.toDouble() ?? 0.0,
-      'height': element.dimensions['height']?.toDouble() ?? 0.0,
-      'area': element.area?.toDouble() ?? 0.0,
-      'bbox': element.bbox,
-      'center': element.center,
-      'dimensions': element.dimensions,
-      'relative_position': element.relativePosition,
-    }).toList();
-
-    final annotationId = 'enhanced_${DateTime.now().millisecondsSinceEpoch}';
-
-    // Show assessment type selection
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Choose Safety Assessment Type'),
-        content: const Text(
-          'Select how you would like to assess the safety of your floor plan:'
-        ),
-        actions: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  
-                  // Determine the best image to use
-                  String? imageToUse = _result.originalImageBase64;
-                  if (imageToUse == null || imageToUse.isEmpty) {
-                    imageToUse = _result.annotatedImageBase64;
-                    print('🖼️ Using annotated image as fallback');
-                  } else {
-                    print('🖼️ Using original image');
-                  }
-                  
-                  print('   Image data available: ${imageToUse != null}');
-                  if (imageToUse != null) {
-                    print('   Image length: ${imageToUse.length}');
-                    print('   Image starts with: ${imageToUse.substring(0, math.min(50, imageToUse.length))}');
-                  }
-                  
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => EnhancedSafetyHeatmapScreen(
-                        rooms: roomsForSafety,
-                        architecturalElements: architecturalElements,
-                        annotationId: annotationId,
-                        floorPlanImagePath: imageToUse,
-                        rawDetectionResult: widget.detectionResult,
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.grid_on),
-                label: const Text('Enhanced Safety Heatmap'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-              const SizedBox(height: 8),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => RoomSafetyAssessmentScreen(
-                        rooms: roomsForSafety,
-                        annotationId: annotationId,
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.assessment),
-                label: const Text('Room-by-Room Assessment'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  IconData _getMethodIcon(String method) {
-    switch (method) {
-      case 'enhanced_floor_plan_yolo':
-        return Icons.auto_awesome;
-      case 'yolo_vision_hybrid':
-        return Icons.visibility;
-      case 'google_vision_api':
-        return Icons.cloud;
-      default:
-        return Icons.analytics;
-    }
-  }
-
-  Color _getMethodColor(String method) {
-    switch (method) {
-      case 'enhanced_floor_plan_yolo':
-        return Colors.green;
-      case 'yolo_vision_hybrid':
-        return Colors.blue;
-      case 'google_vision_api':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Color _getConfidenceColor(double confidence) {
+ Color _getConfidenceColor(double confidence) {
     if (confidence >= 0.8) return Colors.green;
     if (confidence >= 0.6) return Colors.orange;
     return Colors.red;
   }
-
-  void _showFullScreenImage(String title, String base64Image) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.black,
-        child: Stack(
-          children: [
-            Center(
-              child: InteractiveViewer(
-                panEnabled: true,
-                boundaryMargin: const EdgeInsets.all(20),
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: _buildFullScreenImageWidget(base64Image),
-              ),
-            ),
-            Positioned(
-              top: 40,
-              left: 20,
-              right: 20,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  title,
-                  style: const TextStyle(
-              color: Colors.white,
-                    fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-            Positioned(
-              top: 40,
-              right: 20,
-              child: IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, color: Colors.white, size: 30),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFullScreenImageWidget(String base64Image) {
-    Uint8List imageBytes = _decodeBase64Image(base64Image);
-    if (imageBytes.isEmpty) {
-      return Container(
-        color: Colors.grey[800],
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error, color: Colors.white, size: 60),
-          const SizedBox(height: 16),
-            Text(
-              'Failed to load image',
-              style: TextStyle(color: Colors.white, fontSize: 18),
-            ),
-          ],
-        ),
-      );
-    }
-    return Image.memory(
-      imageBytes,
-      fit: BoxFit.contain,
-    );
-  }
-
-  Widget _buildSamUnavailableCard() {
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.warning_amber, color: Colors.orange, size: 28),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'SAM Visualization Unavailable',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange[800],
-                        ),
-                      ),
-                      Text(
-                        'Room segmentation visualization could not be generated',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Possible Reasons:',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange[800]),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildReasonItem('SAM model not available on the server'),
-                  _buildReasonItem('Image processing failed during segmentation'),
-                  _buildReasonItem('SAM service not properly initialized'),
-                  _buildReasonItem('Network error during analysis'),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info, size: 16, color: Colors.blue[600]),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'YOLO architectural detection is still available in the Analysis tab',
-                            style: TextStyle(fontSize: 12, color: Colors.blue[600]),
-                          ),
-          ),
-        ],
-      ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReasonItem(String reason) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.circle, size: 6, color: Colors.orange[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              reason,
-              style: TextStyle(fontSize: 12, color: Colors.orange[800]),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  
 
   void _toggleEditMode() {
     setState(() {
@@ -4843,17 +2560,118 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     });
   }
 
+  void _editRoomInfo(String sectionType) {
+    final allRooms = _getAllRooms();
+    if (allRooms.isEmpty) return;
+    
+    final room = allRooms[_selectedRoomIndex];
+    final roomName = room['defaultName'] as String;
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        String editedName = roomName;
+        String editedDescription = room.containsKey('description') ? room['description'] as String : '';
+        
+        return AlertDialog(
+          backgroundColor: Colors.grey.withOpacity(0.9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Edit Room Information',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: InputDecoration(
+                  labelText: 'Room Name',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
+                style: TextStyle(color: Colors.white),
+                controller: TextEditingController(text: editedName),
+                onChanged: (value) => editedName = value,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
+                style: TextStyle(color: Colors.white),
+                controller: TextEditingController(text: editedDescription),
+                onChanged: (value) => editedDescription = value,
+                maxLines: 3,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel', style: TextStyle(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  room['defaultName'] = editedName;
+                  room['description'] = editedDescription;
+                });
+                Navigator.of(context).pop();
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Room information updated successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text('Save', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildVitalInfoView() {
     if (_result.originalImageBase64 == null) {
       return Center(
-      child: Column(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-        children: [
+          children: [
             Icon(Icons.home_outlined, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
-          Text(
+            Text(
               'Original Image Required',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: Colors.grey[600],
               ),
             ),
@@ -4870,365 +2688,566 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       );
     }
 
-    return Column(
-      children: [
-        // House boundary toolbar
-        Container(
-          height: 80,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            border: Border(
-              bottom: BorderSide(color: Colors.grey.shade300),
+    return SingleChildScrollView(
+      controller: _vitalInfoScrollController,
+      child: Column(
+        children: [
+          // Glossy House Boundary Header
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.orange.withOpacity(0.1),
+                  Colors.orange.withOpacity(0.05),
+                  Colors.white.withOpacity(0.1),
+                ],
+              ),
+              border: Border.all(
+                color: Colors.orange.withOpacity(0.3),
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.orange.withOpacity(0.1),
+                  blurRadius: 15,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                // Centered Icon and Text
+                Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.3),
+                          width: 2,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.home_work_rounded,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'House Boundary',
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Select the house boundary as close as possible to the actual building perimeter',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              
+                const SizedBox(height: 20),
+              
+                // Action Buttons Row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_hasHouseBoundary)
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.red.withOpacity(0.3)),
+                        ),
+                        child: IconButton(
+                          onPressed: _clearHouseBoundary,
+                          icon: Icon(Icons.clear, color: Colors.red[400], size: 24),
+                          tooltip: 'Clear Boundary',
+                        ),
+                      ),
+                    if (_hasHouseBoundary) const SizedBox(width: 16),
+                    if (_hasHouseBoundary && !_isDrawingHouseBoundary)
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                        ),
+                        child: IconButton(
+                          onPressed: _editHouseBoundary,
+                          icon: Icon(Icons.edit, color: Colors.blue[400], size: 24),
+                          tooltip: 'Edit Boundary',
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ),
           ),
-          child: Row(
-            children: [
-              Icon(Icons.home_outlined, color: Colors.orange[700], size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'House Boundary',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-                  color: Colors.orange[700],
-                ),
-              ),
-              const Spacer(),
-              // Clear boundary button
-              if (_hasHouseBoundary)
-                IconButton(
-                  onPressed: _clearHouseBoundary,
-                  icon: Icon(Icons.clear, color: Colors.red[600]),
-                  tooltip: 'Clear Boundary',
-                ),
-              // Finish boundary button
-              if (_isDrawingHouseBoundary && _houseBoundaryPoints.length >= 3)
-                ElevatedButton.icon(
-                  onPressed: _finishHouseBoundary,
-                  icon: const Icon(Icons.check, size: 16),
-                  label: const Text('Finish'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                ),
-              const SizedBox(width: 8),
-              // Edit boundary button
-              if (_hasHouseBoundary && !_isDrawingHouseBoundary)
-                IconButton(
-                  onPressed: _editHouseBoundary,
-                  icon: Icon(Icons.edit, color: Colors.blue[600]),
-                  tooltip: 'Edit Boundary',
-                ),
-            ],
-          ),
-        ),
-        // Drawing area
-        Expanded(
-          child: Container(
+          const SizedBox(height: 16),
+        
+          // Image Container with Reserved Space for Finish Button
+          Container(
+            height: MediaQuery.of(context).size.height * 0.5, // Fixed height for image
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-              ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
                 child: _buildHouseBoundaryImageWidget(_result.originalImageBase64!),
               ),
             ),
           ),
-        ),
-        // House Wall Thickness Section
-        if (_hasHouseBoundary) ...[
+              
+          // Reserved Space for Finish Button (always present)
           Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.deepPurple.withOpacity(0.05),
-              border: Border(
-                top: BorderSide(color: Colors.grey.shade300),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.architecture, size: 20, color: Colors.deepPurple[700]),
-                    const SizedBox(width: 8),
-                    Text(
-                      'House Wall Thickness',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple[700],
+            height: 60,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: _isDrawingHouseBoundary && _houseBoundaryPoints.length >= 3
+                  ? Container(
+                      child: Center(
+                        child: Container(
+                          constraints: const BoxConstraints(
+                            maxWidth: 280,
+                            minWidth: 200,
+                          ),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.blue[400]!,
+                                Colors.blue[600]!,
+                                Colors.blue[800]!,
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.3),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.blue.withOpacity(0.4),
+                                blurRadius: 15,
+                                offset: const Offset(0, 6),
+                              ),
+                              BoxShadow(
+                                color: Colors.white.withOpacity(0.1),
+                                blurRadius: 2,
+                                offset: const Offset(0, -1),
+                              ),
+                            ],
+                          ),
+                          child: ElevatedButton.icon(
+                            onPressed: _finishHouseBoundary,
+                            icon: const Icon(
+                              Icons.arrow_downward,
+                              size: 22,
+                              color: Colors.white,
+                            ),
+                            label: const Text(
+                              'Next: Wall Details',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.transparent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 0,
+                              shadowColor: Colors.transparent,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : Container(
+                      child: Center(
+                        child: Text(
+                          _isDrawingHouseBoundary 
+                              ? 'Add more points to complete the boundary'
+                              : (_houseBoundaryPoints.isEmpty && !_isDrawingHouseBoundary && !_hasHouseBoundary)
+                                  ? 'Click on the image to start drawing the house perimeter'
+                                  : '',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 16,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
                       ),
                     ),
-                  ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Measure the thickness of your house\'s outer perimeter walls',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.deepPurple[800],
-                    fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 16),
-                _buildHouseWallThicknessSection(),
-              ],
-            ),
-          ),
-        ],
-        // Material Selection Section
-        if (_hasHouseBoundary) ...[
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.05),
-              border: Border(
-                top: BorderSide(color: Colors.grey.shade300),
               ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+            
+          // Animated Wall Details Sections
+          if (_hasHouseBoundary) ...[
+            AnimatedSlide(
+              duration: const Duration(milliseconds: 800),
+              curve: Curves.easeOutCubic,
+              offset: Offset.zero,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 600),
+                opacity: 1.0,
+                child: Column(
                   children: [
-                    Icon(Icons.construction, size: 20, color: Colors.blue[700]),
-                    const SizedBox(width: 8),
-                    Text(
-                      'House Material Selection',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue[700],
+                    // Futuristic Glassy Wall Thickness Section
+                    Container(
+                      key: _houseThicknessKey,
+                      margin: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.deepPurple.withOpacity(0.1),
+                            Colors.deepPurple.withOpacity(0.05),
+                            Colors.white.withOpacity(0.1),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.deepPurple.withOpacity(0.3),
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.deepPurple.withOpacity(0.2),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.1),
+                            blurRadius: 2,
+                            offset: const Offset(0, -1),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.deepPurple.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Icon(
+                                        Icons.architecture,
+                                        color: Colors.white,
+                                        size: 24,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'House Wall Thickness',
+                                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Measure the thickness of your house\'s outer perimeter walls',
+                                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                              color: Colors.white70,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                _buildHouseWallThicknessSection(),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'What material is your house exterior made of?',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.blue[800],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _buildMaterialSelection(),
-              ],
-            ),
-          ),
-        ],
-        // Instructions
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.05),
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade300),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: Colors.orange[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _isDrawingHouseBoundary
-                          ? 'Click on the image to add points and define the house boundary. Click "Finish" when done.'
-                          : _hasHouseBoundary
-                              ? 'House boundary has been defined. Click "Edit" to modify or "Clear" to start over.'
-                              : 'Click on the image to start drawing the house boundary polygon.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.orange[600],
+                  
+                    // Futuristic Glassy Material Selection Section
+                    Container(
+                      margin: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.blue.withOpacity(0.1),
+                            Colors.blue.withOpacity(0.05),
+                            Colors.white.withOpacity(0.1),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.blue.withOpacity(0.3),
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.2),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.1),
+                            blurRadius: 2,
+                            offset: const Offset(0, -1),
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.lightbulb_outline, size: 16, color: Colors.green[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Define the outer boundary of your house to help identify the building perimeter and calculate vital information like total area and perimeter.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.green[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (_hasHouseBoundary && _selectedHouseMaterials.isEmpty) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(Icons.arrow_upward, size: 16, color: Colors.blue[600]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Next: Measure wall thickness and select house material above to complete vital information.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.blue[600],
-                          fontWeight: FontWeight.w500,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Icon(
+                                        Icons.construction,
+                                        color: Colors.white,
+                                        size: 24,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'House Material Selection',
+                                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'What material is your house exterior made of?',
+                                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                              color: Colors.white70,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                _buildMaterialSelection(),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ],
                 ),
+              ),
+            ),
+          ],
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange.withOpacity(0.05),
+              border: Border(
+                top: BorderSide(color: Colors.grey.shade300),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_hasHouseBoundary && _selectedHouseMaterials.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.arrow_upward, size: 16, color: Colors.blue[600]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Next: Measure wall thickness and select house material above to complete vital information.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.blue[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                
+
               ],
-            ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildAnnotationView() {
     if (_result.annotatedImageBase64 == null) {
       return Center(
-      child: Column(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-        children: [
+          children: [
             Icon(Icons.image_not_supported, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'No YOLO Detection Image Available',
+              'No Detection Image Available',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: Colors.grey[600],
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'The annotated image from YOLO detection is required for annotation.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.grey[500],
-              ),
-              textAlign: TextAlign.center,
-            ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      );
+    }
 
     return Column(
       children: [
-        // Annotation toolbar with fixed height
+        // Clean Glassy Toolbar with Scrollable Tools
         Container(
-          height: 120, // Fixed height to prevent resizing
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            border: Border(
-              bottom: BorderSide(color: Colors.grey.shade300),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.draw, color: Colors.blue[700], size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Annotation Tools',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue[700],
-                    ),
-                  ),
-                  const Spacer(),
-                  // Save button
-                  ElevatedButton.icon(
-                    onPressed: _hasUnsavedAnnotations ? _saveAnnotations : null,
-                    icon: Icon(
-                      Icons.save,
-                      size: 16,
-                      color: _hasUnsavedAnnotations ? Colors.white : Colors.grey,
-                    ),
-                    label: Text(
-                      'Save',
-                      style: TextStyle(
-                        color: _hasUnsavedAnnotations ? Colors.white : Colors.grey,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _hasUnsavedAnnotations ? Colors.green : Colors.grey[300],
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Undo button
-                  IconButton(
-                    onPressed: _userAnnotations.isNotEmpty ? _undoLastAnnotation : null,
-                    icon: Icon(
-                      Icons.undo,
-                      color: _userAnnotations.isNotEmpty ? Colors.orange : Colors.grey,
-                    ),
-                    tooltip: 'Undo Last Annotation',
-                  ),
-                ],
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey.withOpacity(0.1),
+            border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
               ),
-              const SizedBox(height: 12),
-              // Tool selection row
+            ],
+          ),
+          child: Row(
+            children: [
+              // Scrollable Tools Section
               Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildGlassyToolButtonWithTitle('wall', Icons.line_style, Colors.green, 'Wall'),
+                      const SizedBox(width: 12),
+                      _buildGlassyToolButtonWithTitle('window', Icons.window, Colors.blue, 'Window'),
+                      const SizedBox(width: 12),
+                      _buildGlassyToolButtonWithTitle('door', Icons.door_front_door, Colors.orange, 'Door'),
+                      const SizedBox(width: 12),
+                      _buildGlassyToolButtonWithTitle('column', Icons.view_column, Colors.red, 'Column'),
+                      const SizedBox(width: 12),
+                      _buildEnhancedGlassyToolButton('stairway', Icons.stairs, Colors.purple, 'Stairway'),
+                      const SizedBox(width: 12),
+                      _buildEnhancedGlassyToolButton('mamad', Icons.security, Colors.pink, 'MAMAD'),
+                      const SizedBox(width: 12),
+                      _buildRoomGlassyToolButton(),
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(width: 16),
+              
+              // Anchored Action Buttons
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(25),
+                  border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
+                ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    _buildToolButton('wall', Icons.line_style, Colors.lightGreen, 'Wall'),
-                    const SizedBox(width: 8),
-                    _buildToolButton('window', Icons.window, Colors.green, 'Window'),
-                    const SizedBox(width: 8),
-                    _buildToolButton('door', Icons.door_front_door, Colors.orange, 'Door'),
-                    const SizedBox(width: 8),
-                    _buildToolButton('column', Icons.view_column, Colors.red, 'Column'),
-                    const SizedBox(width: 8),
-                    _buildEnhancedToolButton('stairway', Icons.stairs, Colors.purple, 'Stairway'),
-                    const SizedBox(width: 8),
-                    _buildEnhancedToolButton('mamad', Icons.security, const Color(0xFFFF1493), 'MAMAD'),
-                    const SizedBox(width: 8),
-                    _buildRoomToolButton(),
-                    const SizedBox(width: 8),
-                    _buildToolButton('eraser', Icons.delete_forever, Colors.grey, 'Eraser'),
-                    const Spacer(),
-                    // Stroke width control
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          'Stroke: ${_strokeWidth.toInt()}px',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        SizedBox(
-                          width: 100,
-                          child: Slider(
-                            value: _strokeWidth,
-                            min: 1.0,
-                            max: 10.0,
-                            divisions: 9,
-                            onChanged: (value) {
-                              setState(() {
-                                _strokeWidth = value;
-                              });
-                            },
-                          ),
-                        ),
-                      ],
+                    IconButton(
+                      onPressed: _userAnnotations.isNotEmpty ? _undoLastAnnotation : null,
+                      icon: Icon(
+                        Icons.undo,
+                        color: _userAnnotations.isNotEmpty ? Colors.white : Colors.white54,
+                        size: 20,
+                      ),
+                      tooltip: 'Undo',
+                    ),
+                    Container(
+                      width: 1,
+                      height: 20,
+                      color: Colors.white.withOpacity(0.2),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() {
+                        _currentDrawingTool = 'eraser';
+                        _currentDrawingColor = Colors.grey;
+                      }),
+                      icon: Icon(
+                        Icons.delete_forever,
+                        color: _currentDrawingTool == 'eraser' ? Colors.red : Colors.white70,
+                        size: 20,
+                      ),
+                      tooltip: 'Eraser',
+                    ),
+                    Container(
+                      width: 1,
+                      height: 20,
+                      color: Colors.white.withOpacity(0.2),
+                    ),
+                    IconButton(
+                      onPressed: _hasUnsavedAnnotations ? _saveAnnotations : null,
+                      icon: Icon(
+                        Icons.save,
+                        color: _hasUnsavedAnnotations ? Colors.green : Colors.white54,
+                        size: 20,
+                      ),
+                      tooltip: 'Save',
                     ),
                   ],
                 ),
@@ -5236,7 +3255,8 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
             ],
           ),
         ),
-        // Drawing area - takes remaining space
+        
+        // Image Area
         Expanded(
           child: Stack(
             children: [
@@ -5245,16 +3265,15 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                 padding: const EdgeInsets.all(16),
                 child: Container(
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     child: _buildDrawableImageWidget(_result.annotatedImageBase64!),
                   ),
                 ),
               ),
-              // Floating controls overlay
               if (_showDrawingControls && (_currentDrawingTool == 'stairway' || _currentDrawingTool == 'mamad')) 
                 _buildFloatingEnhancedControls(),
               if (_showRoomTypeSelector && _currentDrawingTool == 'room')
@@ -5262,75 +3281,12 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
             ],
           ),
         ),
-        // Instructions
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.05),
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade300),
-            ),
-      ),
-      child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-              Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Select a tool above and draw directly on the image to add missing architectural elements. Enhanced tools (MAMAD, Stairway, Room) support both rectangle and polygon drawing modes with advanced controls.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.blue[600],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.lightbulb_outline, size: 16, color: Colors.green[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Smart Room Tool: Select room type → Choose rectangle (drag) or polygon (click points) → For polygons, click "Finish" when done. Rooms are sent to backend for enhanced processing!',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.green[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: Colors.orange[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'The image automatically switches to the original clean image while drawing for smooth interaction, then shows the AI detection results with your annotations.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.orange[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
 
-  Widget _buildToolButton(String tool, IconData icon, Color color, String label) {
+
+  Widget _buildGlassyToolButtonWithTitle(String tool, IconData icon, Color color, String title) {
     final isSelected = _currentDrawingTool == tool;
     return GestureDetector(
       onTap: () {
@@ -5342,39 +3298,45 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? color : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+          color: isSelected ? color.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: color,
+            color: isSelected ? color : Colors.white.withOpacity(0.3),
             width: isSelected ? 2 : 1,
           ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ] : [],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               icon,
-              size: 16,
-              color: isSelected ? Colors.white : color,
+              size: 18,
+              color: isSelected ? color : Colors.white70,
             ),
-            const SizedBox(width: 4),
-          Text(
-              label,
+            const SizedBox(width: 6),
+            Text(
+              title,
               style: TextStyle(
                 fontSize: 12,
-              fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : color,
+                fontWeight: FontWeight.w500,
+                color: isSelected ? color : Colors.white70,
+              ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildEnhancedToolButton(String tool, IconData icon, Color color, String label) {
+  Widget _buildEnhancedGlassyToolButton(String tool, IconData icon, Color color, String title) {
     final isSelected = _currentDrawingTool == tool;
-    
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -5385,37 +3347,134 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-          color: isSelected ? color : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: color,
+        decoration: BoxDecoration(
+          color: isSelected ? color.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? color : Colors.white.withOpacity(0.3),
             width: isSelected ? 2 : 1,
           ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ] : [],
         ),
-        child: Row(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 16,
-              color: isSelected ? Colors.white : color,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : color,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: isSelected ? color : Colors.white70,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: isSelected ? color : Colors.white70,
+                  ),
+                ),
+                if (isSelected && _showDrawingControls) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more,
+                    size: 14,
+                    color: isSelected ? color : Colors.white70,
+                  ),
+                ],
+              ],
             ),
             if (isSelected && _showDrawingControls) ...[
-              const SizedBox(width: 8),
-              Icon(
-                Icons.settings,
-                size: 12,
-                color: isSelected ? Colors.white : color,
+              const SizedBox(height: 6),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildDrawingModeButton('rectangle', Icons.crop_free, 'Rect'),
+                  const SizedBox(width: 4),
+                  _buildDrawingModeButton('polygon', Icons.polyline, 'Poly'),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoomGlassyToolButton() {
+    final isSelected = _currentDrawingTool == 'room';
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentDrawingTool = 'room';
+          _currentDrawingColor = Colors.teal;
+          _showRoomTypeSelector = isSelected ? !_showRoomTypeSelector : true;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.teal.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? Colors.teal : Colors.white.withOpacity(0.3),
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: Colors.teal.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ] : [],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.meeting_room,
+                  size: 18,
+                  color: isSelected ? Colors.teal : Colors.white70,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Room',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: isSelected ? Colors.teal : Colors.white70,
+                  ),
+                ),
+                if (isSelected && _showRoomTypeSelector) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more,
+                    size: 14,
+                    color: isSelected ? Colors.teal : Colors.white70,
+                  ),
+                ],
+              ],
+            ),
+            if (isSelected && _showRoomTypeSelector) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildDrawingModeButton('rectangle', Icons.crop_free, 'Rect'),
+                  const SizedBox(width: 4),
+                  _buildDrawingModeButton('polygon', Icons.polyline, 'Poly'),
+                ],
               ),
             ],
           ],
@@ -5445,8 +3504,8 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: color,
-          width: 1,
-        ),
+            width: 1,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -5464,9 +3523,9 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                 fontWeight: FontWeight.bold,
                 color: isSelected ? Colors.white : color,
               ),
-          ),
-        ],
-      ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5487,9 +3546,9 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       return Container(
         height: 200,
         color: Colors.grey[300],
-      child: Column(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-        children: [
+          children: [
             Icon(Icons.error, color: Colors.red, size: 40),
             const SizedBox(height: 8),
             Text('Failed to load image', style: TextStyle(color: Colors.red)),
@@ -5656,29 +3715,16 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                           ),
                         ),
                         const SizedBox(width: 4),
-          Text(
-                          'Creating Smart Room...',
-                          style: const TextStyle(
-              color: Colors.white,
-                            fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-                      ] else ...[
-                        Icon(
-                          _isCurrentlyDrawing ? Icons.edit : Icons.auto_awesome,
-                          size: 12,
-                          color: Colors.white,
-                        ),
-                        const SizedBox(width: 4),
                         Text(
-                          _isCurrentlyDrawing ? 'Drawing Mode' : 'AI Detection View',
+                          'Creating Smart Room...',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                      ] else ...[
+                        
                       ],
                     ],
                   ),
@@ -5826,39 +3872,6 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     });
   }
 
-  void _startEnhancedDrawing(Offset position) {
-    if (_selectedDrawingTool == 'rectangle') {
-      setState(() {
-        _isDrawingRoom = true;
-        _currentStroke = [position]; // Store start position for rectangle
-      });
-    } else if (_selectedDrawingTool == 'polygon') {
-      setState(() {
-        _isDrawingRoom = true;
-        _currentPolygonPoints.add(position);
-      });
-    }
-  }
-
-  void _continueEnhancedDrawing(Offset position) {
-    if (_selectedDrawingTool == 'rectangle') {
-      // For rectangle drawing, track the current position for preview (similar to room drawing)
-      setState(() {
-        if (_currentStroke.length == 1) {
-          // Show preview of rectangle being drawn
-          _currentStroke = _generateEnhancedRectanglePreview(_currentStroke[0], position);
-        }
-      });
-    } else if (_selectedDrawingTool == 'polygon') {
-      // For polygon drawing, show preview line to current position (similar to room drawing)
-      setState(() {
-        if (_currentPolygonPoints.isNotEmpty) {
-          _currentStroke = [..._currentPolygonPoints, position];
-        }
-      });
-    }
-  }
-
   void _finishEnhancedDrawing(String tool) {
     if (_selectedDrawingTool == 'rectangle') {
       _finishEnhancedRectangle(tool);
@@ -5904,17 +3917,6 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       
       print('🎨 Enhanced $tool rectangle completed with area ${tool == 'mamad' ? (annotation['roomData'] as Map)['area'] : 'N/A'}');
     }
-  }
-
-  List<Offset> _generateEnhancedRectanglePreview(Offset start, Offset current) {
-    // Generate rectangle preview (same logic as room drawing)
-    return [
-      start,
-      Offset(current.dx, start.dy), // Top right
-      current, // Bottom right
-      Offset(start.dx, current.dy), // Bottom left
-      start, // Close the shape
-    ];
   }
 
   void _endDrawing() {
@@ -5995,20 +3997,6 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     }
   }
 
-  IconData _getToolIcon(String tool) {
-    switch (tool) {
-      case 'wall': return Icons.line_style;
-      case 'window': return Icons.window;
-      case 'door': return Icons.door_front_door;
-      case 'column': return Icons.view_column;
-      case 'stairway': return Icons.stairs;
-      case 'mamad': return Icons.security;
-      case 'room': return Icons.crop_free;
-      case 'eraser': return Icons.delete_forever;
-      default: return Icons.edit;
-    }
-  }
-
   // Helper methods for counting user annotations
   int _getUserAnnotationCount(String elementType) {
     return _userAnnotations.where((annotation) => 
@@ -6055,59 +4043,6 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     return '${_result.analysisSummary}\n\nUser Additions: ${userSummary.join(', ')}.';
   }
 
-  Widget _buildRoomToolButton() {
-    final isSelected = _currentDrawingTool == 'room';
-    final color = Colors.blue.shade600; // More professional blue color
-    
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _currentDrawingTool = 'room';
-          _currentDrawingColor = color;
-          _showRoomTypeSelector = isSelected ? !_showRoomTypeSelector : true;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? color : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: color,
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-        children: [
-            Icon(
-              Icons.meeting_room,
-              size: 16,
-              color: isSelected ? Colors.white : color,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              'Room',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : color,
-              ),
-            ),
-            if (isSelected && _showRoomTypeSelector) ...[
-              const SizedBox(width: 8),
-              Icon(
-                Icons.settings,
-                size: 12,
-                color: isSelected ? Colors.white : color,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildRoomDrawingToolButton(String tool, IconData icon, String label) {
     final isSelected = _selectedRoomDrawingTool == tool;
     final color = Colors.blue.shade600;
@@ -6124,13 +4059,13 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
+        decoration: BoxDecoration(
           color: isSelected ? color : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
-        border: Border.all(
+          border: Border.all(
             color: color,
-          width: 1,
-        ),
+            width: 1,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -6150,35 +4085,6 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShapeButton(String shape, IconData icon) {
-    final isSelected = _roomShape == shape;
-    final color = Colors.grey.shade600;
-    
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _roomShape = shape;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: isSelected ? color : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: color,
-            width: 1,
-          ),
-        ),
-        child: Icon(
-          icon,
-          size: 12,
-          color: isSelected ? Colors.white : color,
         ),
       ),
     );
@@ -6483,7 +4389,7 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       _hasUnsavedAnnotations = true;
     });
     
-    print('🏠 Local room created: ${_selectedRoomType} with area ${(roomAnnotation['roomData'] as Map)['area']}');
+    print('🏠 Local room created: $_selectedRoomType with area ${(roomAnnotation['roomData'] as Map)['area']}');
   }
 
   List<Offset> _generateShapePreview(Offset start, Offset current) {
@@ -6900,18 +4806,18 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
+          boxShadow: [
+            BoxShadow(
               color: Colors.black.withOpacity(0.15),
               blurRadius: 8,
               offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
+            ),
+          ],
+        ),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+          children: [
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -6921,10 +4827,10 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                   size: 16,
                 ),
                 const SizedBox(width: 8),
-          Text(
+                Text(
                   '${_currentDrawingTool == 'stairway' ? 'Stairway' : 'MAMAD'} Drawing',
                   style: TextStyle(
-              fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.bold,
                     color: color,
                     fontSize: 14,
                   ),
@@ -6984,28 +4890,28 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       left: 20,
       child: Container(
         padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
+        decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
+          boxShadow: [
+            BoxShadow(
               color: Colors.black.withOpacity(0.15),
               blurRadius: 8,
               offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
+            ),
+          ],
+        ),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+          children: [
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.meeting_room, color: color, size: 16),
                 const SizedBox(width: 8),
-          Text(
+                Text(
                   'Room Drawing',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
@@ -7106,14 +5012,27 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
       final area = _calculatePolygonArea(_houseBoundaryPoints);
       final perimeter = _calculatePolygonPerimeter(_houseBoundaryPoints);
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'House boundary completed! Area: ${area.toStringAsFixed(1)} px², Perimeter: ${perimeter.toStringAsFixed(1)} px',
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
+      // Scroll smoothly to the house thickness section after a short delay
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _scrollToHouseThickness();
+      });
+    }
+  }
+
+  void _scrollToHouseThickness() {
+    if (_houseThicknessKey.currentContext != null) {
+      final RenderBox renderBox = _houseThicknessKey.currentContext!.findRenderObject() as RenderBox;
+      final position = renderBox.localToGlobal(Offset.zero);
+      
+      // Account for the floating tabs bar height and some additional padding
+      // Floating tabs container has padding (12 vertical) + tab height (~60px) + app bar
+      final topBarOffset = 200.0; // Generous offset to account for floating tabs and app bar
+      final scrollPosition = _vitalInfoScrollController.offset + position.dy - topBarOffset;
+
+      _vitalInfoScrollController.animateTo(
+        scrollPosition,
+        duration: const Duration(milliseconds: 800),
+        curve: Curves.easeInOut,
       );
     }
   }
@@ -7202,7 +5121,7 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                                 ? Icons.edit
                                 : Icons.home_outlined,
                         size: 12,
-              color: Colors.white,
+                        color: Colors.white,
                       ),
                       const SizedBox(width: 4),
                       Text(
@@ -7214,9 +5133,9 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -7253,285 +5172,281 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     return perimeter;
   }
 
-  // Build material selection widget with multiple choice and percentage input
+  // Build material selection widget with futuristic square containers
   Widget _buildMaterialSelection() {
     final totalPercentage = _selectedHouseMaterials.values.fold(0.0, (a, b) => a + b);
     
     return Column(
       children: [
-        // Progress indicator for total percentage - compact
+        // Futuristic Progress Indicator
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // Reduced padding
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: totalPercentage == 100 
-                ? Colors.green.withOpacity(0.1) 
-                : totalPercentage > 100 
-                    ? Colors.red.withOpacity(0.1)
-                    : Colors.orange.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(6), // Smaller radius
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                totalPercentage == 100 
+                    ? Colors.green.withOpacity(0.2)
+                    : totalPercentage > 100 
+                        ? Colors.red.withOpacity(0.2)
+                        : Colors.orange.withOpacity(0.2),
+                totalPercentage == 100 
+                    ? Colors.green.withOpacity(0.1)
+                    : totalPercentage > 100 
+                        ? Colors.red.withOpacity(0.1)
+                        : Colors.orange.withOpacity(0.1),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: totalPercentage == 100 
-                  ? Colors.green
+                  ? Colors.green.withOpacity(0.4)
                   : totalPercentage > 100 
-                      ? Colors.red
-                      : Colors.orange,
-              width: 1,
+                      ? Colors.red.withOpacity(0.4)
+                      : Colors.orange.withOpacity(0.4),
+              width: 1.5,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: totalPercentage == 100 
+                    ? Colors.green.withOpacity(0.3)
+                    : totalPercentage > 100 
+                        ? Colors.red.withOpacity(0.3)
+                        : Colors.orange.withOpacity(0.3),
+                blurRadius: 15,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Row(
             children: [
-              Icon(
-                totalPercentage == 100 ? Icons.check_circle : Icons.pie_chart,
-                size: 14, // Smaller icon
-                color: totalPercentage == 100 
-                    ? Colors.green[700]
-                    : totalPercentage > 100 
-                        ? Colors.red[700]
-                        : Colors.orange[700],
-              ),
-              const SizedBox(width: 6), // Reduced spacing
-              Text(
-                'Total: ${totalPercentage.toStringAsFixed(0)}%',
-                style: TextStyle(
-                  fontSize: 11, // Smaller text
-                  fontWeight: FontWeight.bold,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
                   color: totalPercentage == 100 
-                      ? Colors.green[800]
+                      ? Colors.green.withOpacity(0.3)
                       : totalPercentage > 100 
-                          ? Colors.red[800]
-                          : Colors.orange[800],
+                          ? Colors.red.withOpacity(0.3)
+                          : Colors.orange.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  totalPercentage == 100 ? Icons.check_circle : Icons.pie_chart,
+                  size: 20,
+                  color: Colors.white,
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
               Expanded(
-                child: LinearProgressIndicator(
-                  value: (totalPercentage / 100).clamp(0.0, 1.0),
-                  backgroundColor: Colors.grey[300],
-                  valueColor: AlwaysStoppedAnimation(
-                    totalPercentage == 100 
-                        ? Colors.green
-                        : totalPercentage > 100 
-                            ? Colors.red
-                            : Colors.orange,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                totalPercentage == 100 
-                    ? 'Complete'
-                    : totalPercentage > 100 
-                        ? 'Over 100%'
-                        : '${(100 - totalPercentage).toStringAsFixed(0)}% left', // Shorter text
-                style: TextStyle(
-                  fontSize: 9, // Smaller text
-                  color: totalPercentage == 100 
-                      ? Colors.green[700]
-                      : totalPercentage > 100 
-                          ? Colors.red[700]
-                          : Colors.orange[700],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Total: ${totalPercentage.toStringAsFixed(0)}%',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    LinearProgressIndicator(
+                      value: (totalPercentage / 100).clamp(0.0, 1.0),
+                      backgroundColor: Colors.white.withOpacity(0.2),
+                      valueColor: AlwaysStoppedAnimation(
+                        totalPercentage == 100 
+                            ? Colors.green
+                            : totalPercentage > 100 
+                                ? Colors.red
+                                : Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      totalPercentage == 100 
+                          ? 'Complete'
+                          : totalPercentage > 100 
+                              ? 'Over 100%'
+                              : '${(100 - totalPercentage).toStringAsFixed(0)}% left',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 8), // Reduced spacing
+        const SizedBox(height: 20),
         
-        // Material selection list with percentage inputs - compact version
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 180), // Reduced height
-          child: ListView.builder(
-            shrinkWrap: true,
-            physics: const AlwaysScrollableScrollPhysics(),
-            itemCount: _israeliHouseMaterials.length,
-            itemBuilder: (context, index) {
-              final material = _israeliHouseMaterials[index];
-              final materialName = material['name'] as String;
-              final isSelected = _selectedHouseMaterials.containsKey(materialName);
-              
-              // Initialize controller if not exists
-              if (!_percentageControllers.containsKey(materialName)) {
-                _percentageControllers[materialName] = TextEditingController();
-              }
-              
-    return Container(
-                margin: const EdgeInsets.symmetric(vertical: 1), // Reduced margin
-      decoration: BoxDecoration(
-                  color: isSelected ? Colors.blue.withOpacity(0.05) : Colors.white,
-                  borderRadius: BorderRadius.circular(6), // Smaller radius
-        border: Border.all(
-                    color: isSelected ? Colors.blue.withOpacity(0.3) : Colors.grey.shade300,
-          width: 1,
-        ),
+        // Futuristic Material Grid
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: _selectedHouseMaterials.isNotEmpty ? 0.85 : 1.0,
+          ),
+          itemCount: _israeliHouseMaterials.length,
+          itemBuilder: (context, index) {
+            final material = _israeliHouseMaterials[index];
+            final materialName = material['name'] as String;
+            final isSelected = _selectedHouseMaterials.containsKey(materialName);
+            
+            // Initialize controller if not exists
+            if (!_percentageControllers.containsKey(materialName)) {
+              _percentageControllers[materialName] = TextEditingController();
+            }
+            
+            return GestureDetector(
+              onTap: () => _toggleMaterial(materialName),
+              child: AnimatedScale(
+                scale: isSelected ? 1.02 : 1.0,
+                duration: const Duration(milliseconds: 300),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                decoration: BoxDecoration(
+                  color: isSelected 
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isSelected 
+                        ? Colors.white.withOpacity(0.6)
+                        : Colors.white.withOpacity(0.3),
+                    width: isSelected ? 2.0 : 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isSelected 
+                          ? Colors.white.withOpacity(0.3)
+                          : Colors.white.withOpacity(0.1),
+                      blurRadius: isSelected ? 20 : 10,
+                      offset: isSelected ? const Offset(0, 8) : const Offset(0, 4),
+                      spreadRadius: isSelected ? 2 : 0,
+                    ),
+                    if (isSelected)
+                      BoxShadow(
+                        color: Colors.white.withOpacity(0.1),
+                        blurRadius: 5,
+                        offset: const Offset(0, -2),
+                      ),
+                  ],
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // Reduced padding
-                  child: Row(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Checkbox - smaller
-                      GestureDetector(
-                        onTap: () => _toggleMaterial(materialName),
-                        child: Container(
-                          width: 16, // Smaller checkbox
-                          height: 16,
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.blue : Colors.transparent,
-                            border: Border.all(
-                              color: isSelected ? Colors.blue : Colors.grey,
-                              width: 1.5,
-                            ),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: isSelected
-                              ? Icon(Icons.check, size: 12, color: Colors.white)
+                      // Material Icon
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isSelected 
+                              ? Colors.white.withOpacity(0.3)
+                              : Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: isSelected 
+                              ? Border.all(color: Colors.white.withOpacity(0.4), width: 1)
                               : null,
                         ),
-                      ),
-                      const SizedBox(width: 6), // Reduced spacing
-                      
-                      // Material icon - smaller
-                      Icon(
-                        material['icon'] as IconData,
-                        color: isSelected ? Colors.blue[700] : Colors.grey[600],
-                        size: 14, // Smaller icon
-                      ),
-                      const SizedBox(width: 6),
-                      
-                      // Material info - single line
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _toggleMaterial(materialName),
-                          child: RichText(
-                            text: TextSpan(
-                              style: TextStyle(
-                                fontSize: 10, // Smaller text
-                                color: isSelected ? Colors.blue[800] : Colors.grey[800],
-                              ),
-                              children: [
-                                TextSpan(
-                                  text: material['name'],
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                TextSpan(
-                                  text: ' (${material['hebrew']})',
-                                  style: TextStyle(
-                                    fontStyle: FontStyle.italic,
-                                    color: isSelected ? Colors.blue[600] : Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                        child: Icon(
+                          material['icon'] as IconData,
+                          color: Colors.white,
+                          size: isSelected ? 30 : 28,
                         ),
                       ),
+                      const SizedBox(height: 4),
                       
-                      // Percentage input - smaller
+                      // Material Title
+                      Text(
+                        material['name'],
+                        style: TextStyle(
+                          fontSize: isSelected ? 13 : 12,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected ? Colors.white : Colors.white.withOpacity(0.9),
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 1),
+                      
+                      // Hebrew Name
+                      Text(
+                        material['hebrew'],
+                        style: TextStyle(
+                          fontSize: isSelected ? 12 : 11,
+                          color: isSelected ? Colors.white.withOpacity(0.8) : Colors.white70,
+                          fontStyle: FontStyle.italic,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      
+                      // Percentage Input (if selected)
                       if (isSelected) ...[
+                        const SizedBox(height: 4),
                         Container(
-                          width: 50, // Smaller width
-                          height: 28, // Smaller height
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                          ),
-                          child: TextField(
-                            controller: _percentageControllers[materialName],
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 10), // Smaller text
-                            decoration: InputDecoration(
-                              hintText: '0',
-                              hintStyle: TextStyle(color: Colors.grey[400], fontSize: 10),
-                              suffix: Text('%', style: TextStyle(fontSize: 8, color: Colors.grey[600])),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-                            ),
-                            onChanged: (value) => _updatePercentage(materialName, value),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _percentageControllers[materialName],
+                                  keyboardType: TextInputType.number,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: '0',
+                                    hintStyle: TextStyle(color: Colors.white60, fontSize: 12),
+                                    border: UnderlineInputBorder(
+                                      borderSide: BorderSide(color: Colors.white, width: 1),
+                                    ),
+                                    enabledBorder: UnderlineInputBorder(
+                                      borderSide: BorderSide(color: Colors.white, width: 1),
+                                    ),
+                                    focusedBorder: UnderlineInputBorder(
+                                      borderSide: BorderSide(color: Colors.white, width: 2),
+                                    ),
+                                    filled: false,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  ),
+                                  onChanged: (value) => _updatePercentage(materialName, value),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '%',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ] else ...[
-                        const SizedBox(width: 50), // Smaller placeholder space
                       ],
                     ],
                   ),
                 ),
-              );
-            },
-          ),
-        ),
-        
-        // Selected materials summary - compact
-        if (_selectedHouseMaterials.isNotEmpty) ...[
-          const SizedBox(height: 8), // Reduced spacing
-          Container(
-            padding: const EdgeInsets.all(8), // Reduced padding
-            decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6), // Smaller radius
-              border: Border.all(color: Colors.blue.withOpacity(0.3)),
-      ),
-      child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-                Row(
-                  children: [
-                    Icon(Icons.summarize, size: 14, color: Colors.blue[700]), // Smaller icon
-                    const SizedBox(width: 6), // Reduced spacing
-          Text(
-                      'Selected Materials (${_selectedHouseMaterials.length})', // Shorter title
-                      style: TextStyle(
-                        fontSize: 11, // Smaller text
-              fontWeight: FontWeight.bold,
-                        color: Colors.blue[800],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6), // Reduced spacing
-                ..._selectedHouseMaterials.entries.map((entry) {
-                  final material = _israeliHouseMaterials.firstWhere(
-                    (m) => m['name'] == entry.key,
-                  );
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 1), // Reduced spacing
-                    child: Row(
-                      children: [
-                        Icon(material['icon'] as IconData, size: 10, color: Colors.blue[600]), // Smaller icon
-                        const SizedBox(width: 4), // Reduced spacing
-                        Expanded(
-                          child: Text(
-                            '${entry.key} (${material['hebrew']})',
-                            style: TextStyle(fontSize: 9, color: Colors.blue[700]), // Smaller text
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), // Reduced padding
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(6), // Smaller radius
-                          ),
-                          child: Text(
-                            '${entry.value.toStringAsFixed(0)}%',
-                            style: TextStyle(
-                              fontSize: 9, // Smaller text
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue[800],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ],
+              ),
             ),
-          ),
-        ],
+            );
+          },
+        ),
       ],
     );
   }
@@ -7556,30 +5471,58 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
     });
   }
 
+  // Check if all vital information is complete
+  bool _isVitalInfoComplete() {
+    // Check if house boundary exists
+    if (!_hasHouseBoundary) return false;
+    
+    // Check if materials total 100%
+    final totalPercentage = _selectedHouseMaterials.values.fold(0.0, (a, b) => a + b);
+    if (totalPercentage != 100.0) return false;
+    
+    // Check if house wall thickness is measured
+    if (_houseWallThicknessResults.isEmpty) return false;
+    
+    return true;
+  }
+
+  // Navigate to risk assessment screen
+  void _navigateToRiskAssessment() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => RiskAssessmentScreen(
+          detectionResult: _result,
+          userAnnotations: _userAnnotations,
+          selectedHouseMaterials: _selectedHouseMaterials,
+          houseBoundaryPoints: _houseBoundaryPoints,
+        ),
+      ),
+    );
+  }
+
   // Add new method for wall thickness analysis section
   Widget _buildWallThicknessAnalysisSection(Map<String, dynamic> room) {
     final roomId = room['roomId']?.toString() ?? room['id']?.toString() ?? '';
     final wallThicknessData = _wallThicknessResults[roomId];
     
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.architecture, color: Colors.deepPurple),
-            const SizedBox(width: 8),
-            Text(
-              'Wall Thickness Analysis',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        
-        // Wall thickness analysis card
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -7587,240 +5530,310 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
               children: [
                 Row(
                   children: [
-                    Icon(Icons.camera_alt, color: Colors.deepPurple[600], size: 20),
+                    const Icon(Icons.architecture, color: Colors.deepPurple, size: 20),
                     const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'Measure Wall Thickness',
-                        style: TextStyle(
+                    Expanded(
+                      child: AutoSizeText(
+                        'Wall Thickness Analysis',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
                         ),
+                        maxLines: 1,
+                        minFontSize: 12,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (wallThicknessData != null) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.green.withOpacity(0.3)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Analyzed',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.green[700],
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                   ],
                 ),
-                const SizedBox(height: 8),
-                
-                const Text(
-                  'Take a photo of a door or window frame to measure wall thickness using AI depth analysis.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                  ),
-                ),
-                
                 const SizedBox(height: 12),
                 
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _analyzeWallThickness(roomId, ImageSource.camera),
-                        icon: const Icon(Icons.camera_alt, size: 16),
-                        label: const Text('Camera', style: TextStyle(fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _analyzeWallThickness(roomId, ImageSource.gallery),
-                        icon: const Icon(Icons.photo_library, size: 16),
-                        label: const Text('Browse', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.deepPurple,
-                          side: BorderSide(color: Colors.deepPurple),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _manualWallThicknessInput(roomId),
-                        icon: const Icon(Icons.edit, size: 16),
-                        label: const Text('Manual', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.orange,
-                          side: BorderSide(color: Colors.orange),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                
-                // Show results if available
-                if (wallThicknessData != null) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.withOpacity(0.2)),
-                    ),
+                // Wall thickness analysis card
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withOpacity(0.15), width: 1),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.analytics, color: Colors.green[700], size: 16),
+                            Icon(Icons.camera_alt, color: Colors.deepPurple[600], size: 20),
                             const SizedBox(width: 8),
-                            const Text(
-                              'Analysis Results',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        
-                        // Wall thickness result
-                        Row(
-                          children: [
-                            const Text('Wall Thickness: ', style: TextStyle(fontSize: 12)),
-                            Text(
-                              '${wallThicknessData['wall_thickness_cm']} cm',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.deepPurple,
-                              ),
-                            ),
-                            if (wallThicknessData['calibration_method'] == 'manual_input') ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.orange, width: 0.5),
+                            Expanded(
+                              child: AutoSizeText(
+                                'Measure Wall Thickness',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: Colors.white,
                                 ),
-                                child: Text(
-                                  'Manual',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    color: Colors.orange[700],
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                maxLines: 1,
+                                minFontSize: 12,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (wallThicknessData != null) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
+                                    const SizedBox(width: 4),
+                                    AutoSizeText(
+                                      'Analyzed',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.green[700],
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      maxLines: 1,
+                                      minFontSize: 8,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ],
                         ),
+                        const SizedBox(height: 8),
                         
-                        // Confidence level
-                        Row(
-                          children: [
-                            const Text('Confidence: ', style: TextStyle(fontSize: 12)),
-                            Text(
-                              '${(wallThicknessData['confidence'] * 100).toStringAsFixed(0)}%',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: _getConfidenceColor(wallThicknessData['confidence']),
-                              ),
-                            ),
-                          ],
+                        AutoSizeText(
+                          'Take a photo of a door or window frame to measure wall thickness using AI depth analysis.',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white70,
+                          ),
+                          maxLines: 2,
+                          minFontSize: 10,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         
-                        // Measurement points
+                        const SizedBox(height: 12),
+                        
+                        // Action buttons
                         Row(
                           children: [
-                            const Text('Measurement Points: ', style: TextStyle(fontSize: 12)),
-                            Text(
-                              '${wallThicknessData['measurement_points']}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        
-                        // Show depth visualization if available
-                        if (wallThicknessData['depth_visualization'] != null) ...[
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: () => _showDepthVisualization(wallThicknessData['depth_visualization']),
-                            child: Container(
-                              height: 100,
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.grey.shade300),
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.memory(
-                                  base64Decode(wallThicknessData['depth_visualization'].split(',')[1]),
-                                  fit: BoxFit.cover,
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _analyzeWallThickness(roomId, ImageSource.camera),
+                                icon: const Icon(Icons.camera_alt, size: 16),
+                                label: const Text('Camera', style: TextStyle(fontSize: 12)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.deepPurple,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Tap to view full depth visualization',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                              fontStyle: FontStyle.italic,
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _analyzeWallThickness(roomId, ImageSource.gallery),
+                                icon: const Icon(Icons.photo_library, size: 16),
+                                label: const Text('Browse', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.deepPurple,
+                                  side: BorderSide(color: Colors.deepPurple),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _manualWallThicknessInput(roomId),
+                                icon: const Icon(Icons.edit, size: 16),
+                                label: const Text('Manual', style: TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.orange,
+                                  side: BorderSide(color: Colors.orange),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        
+                        // Show results if available
+                        if (wallThicknessData != null) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.withOpacity(0.2)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.analytics, color: Colors.green[700], size: 16),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: AutoSizeText(
+                                        'Analysis Results',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                          color: Colors.white,
+                                        ),
+                                        maxLines: 1,
+                                        minFontSize: 12,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                
+                                // Wall thickness result
+                                Row(
+                                  children: [
+                                    const Text('Wall Thickness: ', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                                    Expanded(
+                                      child: AutoSizeText(
+                                        '${wallThicknessData['wall_thickness_cm']} cm',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                        maxLines: 1,
+                                        minFontSize: 10,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (wallThicknessData['calibration_method'] == 'manual_input') ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.orange, width: 0.5),
+                                        ),
+                                        child: AutoSizeText(
+                                          'Manual',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            color: Colors.orange[700],
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          maxLines: 1,
+                                          minFontSize: 8,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                
+                                // Confidence level
+                                Row(
+                                  children: [
+                                    const Text('Confidence: ', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                                    Expanded(
+                                      child: AutoSizeText(
+                                        '${(wallThicknessData['confidence'] * 100).toStringAsFixed(0)}%',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: _getConfidenceColor(wallThicknessData['confidence']),
+                                        ),
+                                        maxLines: 1,
+                                        minFontSize: 10,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                
+                                // Measurement points
+                                Row(
+                                  children: [
+                                    const Text('Measurement Points: ', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                                    Expanded(
+                                      child: AutoSizeText(
+                                        '${wallThicknessData['measurement_points']}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                        maxLines: 1,
+                                        minFontSize: 10,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                
+                                // Show depth visualization if available
+                                if (wallThicknessData['depth_visualization'] != null) ...[
+                                  const SizedBox(height: 8),
+                                  GestureDetector(
+                                    onTap: () => _showDepthVisualization(wallThicknessData['depth_visualization']),
+                                    child: Container(
+                                      height: 100,
+                                      width: double.infinity,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.grey.shade300),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.memory(
+                                          base64Decode(wallThicknessData['depth_visualization'].split(',')[1]),
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Tap to view full depth visualization',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.white70,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ],
                       ],
                     ),
                   ),
-                ],
+                ),
               ],
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 
@@ -8088,9 +6101,9 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                 color: Colors.orange.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: Colors.orange.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
+              ),
+              child: Row(
+                children: [
                   Icon(Icons.info_outline, size: 14, color: Colors.orange[600]),
                   const SizedBox(width: 6),
                   Expanded(
@@ -8451,46 +6464,299 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
   Widget _buildHouseWallThicknessSection() {
     final wallThicknessData = _houseWallThicknessResults['house_perimeter'];
     
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-      child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Container(
+      margin: const EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 32,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.camera_enhance, color: Colors.deepPurple[600], size: 20),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Measure Outer Wall Thickness',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                Row(
+                  children: [
+                    Icon(Icons.camera_enhance, color: Colors.deepPurple[600], size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Measure Outer Wall Thickness',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
+                    if (wallThicknessData != null) ...[
+                    Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.green.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Measured',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.green[700],
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 8),
+                
+                const Text(
+                  'Take a photo of an exterior door frame or window frame to measure the thickness of your house\'s outer walls.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
                   ),
                 ),
+                
+                const SizedBox(height: 12),
+                
+                             // Action buttons
+                 Row(
+                   children: [
+                    Expanded(
+                       child: ElevatedButton.icon(
+                         onPressed: _isAnalyzingHouseWallThickness 
+                             ? null 
+                             : () => _analyzeHouseWallThickness(ImageSource.camera),
+                         icon: _isAnalyzingHouseWallThickness 
+                             ? SizedBox(
+                                 width: 14,
+                                 height: 14,
+                                 child: CircularProgressIndicator(
+                                   strokeWidth: 2,
+                                   valueColor: AlwaysStoppedAnimation(Colors.white),
+                                 ),
+                               )
+                             : const Icon(Icons.camera_alt, size: 16),
+                         label: Text(
+                           _isAnalyzingHouseWallThickness ? 'Analyzing...' : 'Camera',
+                           style: const TextStyle(fontSize: 12),
+                         ),
+                         style: ElevatedButton.styleFrom(
+                           backgroundColor: Colors.deepPurple,
+                           foregroundColor: Colors.white,
+                           shape: RoundedRectangleBorder(
+                             borderRadius: BorderRadius.circular(8),
+                           ),
+                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                         ),
+                       ),
+                     ),
+                     const SizedBox(width: 6),
+                     Expanded(
+                       child: OutlinedButton.icon(
+                         onPressed: _isAnalyzingHouseWallThickness 
+                             ? null 
+                             : () => _analyzeHouseWallThickness(ImageSource.gallery),
+                         icon: const Icon(Icons.photo_library, size: 16),
+                         label: const Text('Browse', style: TextStyle(fontSize: 12)),
+                         style: OutlinedButton.styleFrom(
+                           foregroundColor: Colors.deepPurple,
+                           side: BorderSide(color: Colors.deepPurple),
+                           shape: RoundedRectangleBorder(
+                             borderRadius: BorderRadius.circular(8),
+                           ),
+                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                         ),
+                       ),
+                     ),
+                     const SizedBox(width: 6),
+                     Expanded(
+                       child: OutlinedButton.icon(
+                         onPressed: _isAnalyzingHouseWallThickness 
+                             ? null 
+                             : () => _manualHouseWallThicknessInput(),
+                         icon: const Icon(Icons.edit, size: 16),
+                         label: const Text('Manual', style: TextStyle(fontSize: 12)),
+                         style: OutlinedButton.styleFrom(
+                           foregroundColor: Colors.orange,
+                           side: BorderSide(color: Colors.orange),
+                           shape: RoundedRectangleBorder(
+                             borderRadius: BorderRadius.circular(8),
+                           ),
+                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                         ),
+                       ),
+                     ),
+                   ],
+                 ),
+                
+                // Show results if available
                 if (wallThicknessData != null) ...[
+                  const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                      color: Colors.green.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.withOpacity(0.2)),
                     ),
-                    child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-                        Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Measured',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.green[700],
-                            fontWeight: FontWeight.bold,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                        Row(
+                          children: [
+                            Icon(Icons.analytics, color: Colors.green[700], size: 16),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'House Wall Analysis Results',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        
+                        // Wall thickness result
+                        Row(
+                          children: [
+                            const Text('Outer Wall Thickness: ', style: TextStyle(fontSize: 12)),
+                          Text(
+                              '${wallThicknessData['wall_thickness_cm']} cm',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepPurple,
+                              ),
+                            ),
+                            if (wallThicknessData['calibration_method'] == 'manual_input') ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.orange, width: 0.5),
+                                ),
+                                child: Text(
+                                  'Manual',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: Colors.orange[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        
+                        // Confidence level
+                        Row(
+                          children: [
+                            const Text('Confidence: ', style: TextStyle(fontSize: 12)),
+                            Text(
+                              '${(wallThicknessData['confidence'] * 100).toStringAsFixed(0)}%',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: _getConfidenceColor(wallThicknessData['confidence']),
+                              ),
+                            ),
+                          ],
+                        ),
+                        
+                        // Calibration method
+                        Row(
+                          children: [
+                            const Text('Method: ', style: TextStyle(fontSize: 12)),
+                            Text(
+                              '${wallThicknessData['calibration_method']?.toString().replaceAll('_', ' ') ?? 'Unknown'}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        
+                        // Show depth visualization if available
+                        if (wallThicknessData['depth_visualization'] != null) ...[
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () => _showDepthVisualization(wallThicknessData['depth_visualization']),
+                            child: Container(
+                              height: 100,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  base64Decode(wallThicknessData['depth_visualization'].split(',')[1]),
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Tap to view full depth visualization',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                        
+                        // Additional tip for house walls
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.lightbulb_outline, size: 14, color: Colors.blue[600]),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'This measurement represents the typical thickness of your house\'s outer perimeter walls.',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.blue[600],
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -8499,247 +6765,12 @@ Widget _buildTutorialStep(int step, String title, String description, IconData i
                 ],
               ],
             ),
-            const SizedBox(height: 8),
-            
-            const Text(
-              'Take a photo of an exterior door frame or window frame to measure the thickness of your house\'s outer walls.',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
-              ),
-            ),
-            
-            const SizedBox(height: 12),
-            
-                         // Action buttons
-             Row(
-               children: [
-                 Expanded(
-                   child: ElevatedButton.icon(
-                     onPressed: _isAnalyzingHouseWallThickness 
-                         ? null 
-                         : () => _analyzeHouseWallThickness(ImageSource.camera),
-                     icon: _isAnalyzingHouseWallThickness 
-                         ? SizedBox(
-                             width: 14,
-                             height: 14,
-                             child: CircularProgressIndicator(
-                               strokeWidth: 2,
-                               valueColor: AlwaysStoppedAnimation(Colors.white),
-                             ),
-                           )
-                         : const Icon(Icons.camera_alt, size: 16),
-                     label: Text(
-                       _isAnalyzingHouseWallThickness ? 'Analyzing...' : 'Camera',
-                       style: const TextStyle(fontSize: 12),
-                     ),
-                     style: ElevatedButton.styleFrom(
-                       backgroundColor: Colors.deepPurple,
-                       foregroundColor: Colors.white,
-                       shape: RoundedRectangleBorder(
-                         borderRadius: BorderRadius.circular(8),
-                       ),
-                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                     ),
-                   ),
-                 ),
-                 const SizedBox(width: 6),
-                 Expanded(
-                   child: OutlinedButton.icon(
-                     onPressed: _isAnalyzingHouseWallThickness 
-                         ? null 
-                         : () => _analyzeHouseWallThickness(ImageSource.gallery),
-                     icon: const Icon(Icons.photo_library, size: 16),
-                     label: const Text('Browse', style: TextStyle(fontSize: 12)),
-                     style: OutlinedButton.styleFrom(
-                       foregroundColor: Colors.deepPurple,
-                       side: BorderSide(color: Colors.deepPurple),
-                       shape: RoundedRectangleBorder(
-                         borderRadius: BorderRadius.circular(8),
-                       ),
-                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                     ),
-                   ),
-                 ),
-                 const SizedBox(width: 6),
-                 Expanded(
-                   child: OutlinedButton.icon(
-                     onPressed: _isAnalyzingHouseWallThickness 
-                         ? null 
-                         : () => _manualHouseWallThicknessInput(),
-                     icon: const Icon(Icons.edit, size: 16),
-                     label: const Text('Manual', style: TextStyle(fontSize: 12)),
-                     style: OutlinedButton.styleFrom(
-                       foregroundColor: Colors.orange,
-                       side: BorderSide(color: Colors.orange),
-                       shape: RoundedRectangleBorder(
-                         borderRadius: BorderRadius.circular(8),
-                       ),
-                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                     ),
-                   ),
-                 ),
-               ],
-             ),
-            
-            // Show results if available
-            if (wallThicknessData != null) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withOpacity(0.2)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.analytics, color: Colors.green[700], size: 16),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'House Wall Analysis Results',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    
-                    // Wall thickness result
-                    Row(
-                      children: [
-                        const Text('Outer Wall Thickness: ', style: TextStyle(fontSize: 12)),
-          Text(
-                          '${wallThicknessData['wall_thickness_cm']} cm',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.deepPurple,
-                          ),
-                        ),
-                        if (wallThicknessData['calibration_method'] == 'manual_input') ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.orange, width: 0.5),
-                            ),
-                            child: Text(
-                              'Manual',
-                              style: TextStyle(
-                                fontSize: 9,
-                                color: Colors.orange[700],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    
-                    // Confidence level
-                    Row(
-                      children: [
-                        const Text('Confidence: ', style: TextStyle(fontSize: 12)),
-                        Text(
-                          '${(wallThicknessData['confidence'] * 100).toStringAsFixed(0)}%',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: _getConfidenceColor(wallThicknessData['confidence']),
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    // Calibration method
-                    Row(
-                      children: [
-                        const Text('Method: ', style: TextStyle(fontSize: 12)),
-                        Text(
-                          '${wallThicknessData['calibration_method']?.toString().replaceAll('_', ' ') ?? 'Unknown'}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    // Show depth visualization if available
-                    if (wallThicknessData['depth_visualization'] != null) ...[
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: () => _showDepthVisualization(wallThicknessData['depth_visualization']),
-                        child: Container(
-                          height: 100,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(
-                              base64Decode(wallThicknessData['depth_visualization'].split(',')[1]),
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Tap to view full depth visualization',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ],
-                    
-                    // Additional tip for house walls
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.lightbulb_outline, size: 14, color: Colors.blue[600]),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'This measurement represents the typical thickness of your house\'s outer perimeter walls.',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.blue[600],
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
   }
+  
 }
 
 /// Custom painter for drawing house boundary

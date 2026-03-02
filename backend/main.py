@@ -136,4 +136,5 @@ async def get_safety_scores(home_id: int, current_user: dict = Depends(auth.get_
     raise HTTPException(status_code=501, detail="Not implemented")
 
 if __name__ == "__main__":
-        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
+    # When running as module (python -m backend.main), use full module path
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True) 

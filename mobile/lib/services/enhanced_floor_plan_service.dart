@@ -304,6 +304,22 @@ class DetectedRoom {
       estimatedDimensions: Map<String, double>.from(json['estimated_dimensions'] ?? {}),
     );
   }
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'room_id': roomId,
+      'default_name': defaultName,
+      'boundaries': boundaries,
+      'confidence': confidence,
+      'architectural_elements': architecturalElements.map((e) => e.toJson()).toList(),
+      'description': description,
+      'detection_method': detectionMethod,
+      'doors': doors.map((d) => d.toJson()).toList(),
+      'windows': windows.map((w) => w.toJson()).toList(),
+      'walls': walls.map((w) => w.toJson()).toList(),
+      'estimated_dimensions': estimatedDimensions,
+    };
+  }
 }
 
 class ArchitecturalElement {
@@ -335,5 +351,17 @@ class ArchitecturalElement {
       area: json['area'] ?? 0,
       relativePosition: json['relative_position'] ?? '',
     );
+  }
+  
+  Map<String, dynamic> toJson() {
+    return {
+      'type': type,
+      'confidence': confidence,
+      'bbox': bbox,
+      'center': center,
+      'dimensions': dimensions,
+      'area': area,
+      'relative_position': relativePosition,
+    };
   }
 } 

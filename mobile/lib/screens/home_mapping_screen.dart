@@ -8,11 +8,13 @@ import 'package:http_parser/http_parser.dart';
 import 'dart:convert';
 import 'package:path/path.dart' as path;
 import 'package:mime/mime.dart';
+import 'dart:math' as math;
 import 'room_naming_screen.dart';
 import 'interactive_floor_plan_screen.dart';
 import 'enhanced_detection_results_screen.dart';
 import 'enhanced_model_config_screen.dart';
 import '../services/enhanced_floor_plan_service.dart';
+import '../theme/app_theme.dart';
 
 class HomeMappingScreen extends StatefulWidget {
   const HomeMappingScreen({Key? key}) : super(key: key);
@@ -45,11 +47,17 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
   late AnimationController _backgroundAnimationController;
   late Animation<double> _backgroundRotationAnimation;
   late Animation<double> _pulseAnimation;
+  
+  // Shooting stars animation
+  late AnimationController _starsAnimationController;
+  final List<ShootingStar> _shootingStars = [];
+  final int _numberOfStars = 5;
 
   @override
   void initState() {
     super.initState();
     _checkModelStatus();
+    _initializeStars();
     
     // Initialize tutorial animations
     _tutorialAnimationController = AnimationController(
@@ -113,6 +121,12 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
       parent: _backgroundAnimationController,
       curve: Curves.easeInOut,
     ));
+    
+    // Stars animation
+    _starsAnimationController = AnimationController(
+      duration: const Duration(seconds: 3),
+      vsync: this,
+    )..repeat();
 
     // Show tutorial popup after a brief delay
     Future.delayed(const Duration(milliseconds: 800), () {
@@ -122,11 +136,18 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
     });
   }
   
+  void _initializeStars() {
+    for (int i = 0; i < _numberOfStars; i++) {
+      _shootingStars.add(ShootingStar());
+    }
+  }
+  
   @override
   void dispose() {
     _tutorialAnimationController.dispose();
     _analysisAnimationController.dispose();
     _backgroundAnimationController.dispose();
+    _starsAnimationController.dispose();
     super.dispose();
   }
 
@@ -724,17 +745,40 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
       height: 300,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        // Glossy transparent background
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.15),
+            Colors.white.withOpacity(0.05),
+            Colors.white.withOpacity(0.1),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey[300]!,
-          width: 2,
-          style: BorderStyle.solid,
+          color: Colors.white.withOpacity(0.3),
+          width: 1,
         ),
+        boxShadow: [
+          // Outer glow
+          BoxShadow(
+            color: Colors.white.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 0),
+            spreadRadius: 2,
+          ),
+          // Inner shadow for depth
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: _imageSelected
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(15),
               child: kIsWeb && _webImage != null
                   ? Image.memory(
                       _webImage!,
@@ -754,10 +798,30 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
                   : Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.home_work_outlined,
-                size: 64,
-                color: Colors.grey[400],
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(40),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.3),
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.white.withOpacity(0.1),
+                      blurRadius: 15,
+                      offset: const Offset(0, 0),
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.home_work_outlined,
+                  size: 40,
+                  color: Colors.white,
+                ),
               ),
               const SizedBox(height: 16),
               Text(
@@ -765,7 +829,14 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey[600],
+                  color: Colors.white,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black.withOpacity(0.3),
+                      offset: const Offset(0, 1),
+                      blurRadius: 2,
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 8),
@@ -774,7 +845,7 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey[500],
+                  color: Colors.white.withOpacity(0.8),
                   height: 1.4,
                 ),
               ),
@@ -788,13 +859,11 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Theme.of(context).primaryColor.withOpacity(0.05),
-            Theme.of(context).primaryColor.withOpacity(0.02),
-          ],
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.2),
+          width: 1,
         ),
       ),
       child: Column(
@@ -810,18 +879,17 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [
-                          Theme.of(context).primaryColor.withOpacity(0.3),
-                          Theme.of(context).primaryColor.withOpacity(0.1),
-                        ],
+                      color: Colors.white.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(40),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.3),
+                        width: 2,
                       ),
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.security,
                       size: 40,
-                      color: Theme.of(context).primaryColor,
+                      color: Colors.white,
                     ),
                   ),
                 ),
@@ -834,6 +902,14 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
+              color: Colors.white,
+              shadows: [
+                Shadow(
+                  color: Colors.black26,
+                  offset: Offset(0, 2),
+                  blurRadius: 4,
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 8),
@@ -842,7 +918,7 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
-              color: Colors.grey[600],
+              color: Colors.white.withOpacity(0.9),
               height: 1.4,
             ),
           ),
@@ -864,10 +940,10 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Theme.of(context).primaryColor.withOpacity(0.1),
+        color: Colors.white.withOpacity(0.2),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: Theme.of(context).primaryColor.withOpacity(0.3),
+          color: Colors.white.withOpacity(0.3),
         ),
       ),
       child: Row(
@@ -876,47 +952,15 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
           Icon(
             icon,
             size: 16,
-            color: Theme.of(context).primaryColor,
+            color: Colors.white,
           ),
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: Theme.of(context).primaryColor,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUploadHint(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).primaryColor.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(
-          color: Theme.of(context).primaryColor.withOpacity(0.2),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: Theme.of(context).primaryColor,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: Theme.of(context).primaryColor,
+              color: Colors.white,
             ),
           ),
         ],
@@ -930,28 +974,94 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
       child: Row(
         children: [
           Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () => _getImage(ImageSource.gallery),
-              icon: const Icon(Icons.upload_file),
-              label: const Text('Upload Image'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            child: Container(
+              height: 50,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(25),
+                gradient: const LinearGradient(
+                  colors: [
+                    AppTheme.starYellow,
+                    Color(0xFFFFC107),
+                  ],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.starYellow.withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(25),
+                  onTap: () => _getImage(ImageSource.gallery),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.upload_file,
+                          color: Colors.black87,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Upload Image',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () => _getImage(ImageSource.camera),
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Take Photo'),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            child: Container(
+              height: 50,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(25),
+                color: Colors.white.withOpacity(0.2),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(25),
+                  onTap: () => _getImage(ImageSource.camera),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Take Photo',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -960,8 +1070,6 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
       ),
     );
   }
-
-
 
   Widget _buildAnalysisButtons() {
     return Padding(
@@ -972,69 +1080,182 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).primaryColor.withOpacity(0.1),
-                  Theme.of(context).primaryColor.withOpacity(0.05),
-                ],
-              ),
+              color: Colors.white.withOpacity(0.1),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: Theme.of(context).primaryColor.withOpacity(0.2),
+                color: Colors.white.withOpacity(0.2),
+                width: 1,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Column(
               children: [
                 Icon(
                   Icons.psychology,
                   size: 48,
-                  color: Theme.of(context).primaryColor,
+                  color: Colors.white,
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'Ready for Analysis',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Choose how you\'d like to analyze your floor plan',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey,
+                    color: Colors.white.withOpacity(0.9),
                   ),
                 ),
                 const SizedBox(height: 24),
                 Row(
                   children: [
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _analyzeFloorPlan,
-                        icon: const Icon(Icons.auto_awesome),
-                        label: const Text('AI Analysis'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        height: 50,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(25),
+                          gradient: const LinearGradient(
+                            colors: [
+                              AppTheme.starYellow,
+                              Color(0xFFFFC107),
+                            ],
+                          ),
+                          // Fixed glowing border for recommended option
+                          border: Border.all(
+                            color: AppTheme.starYellow.withOpacity(0.9),
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            // Fixed glow effect
+                            BoxShadow(
+                              color: AppTheme.starYellow.withOpacity(0.6),
+                              blurRadius: 18,
+                              offset: const Offset(0, 4),
+                              spreadRadius: 2,
+                            ),
+                            // Additional outer glow
+                            BoxShadow(
+                              color: AppTheme.starYellow.withOpacity(0.2),
+                              blurRadius: 25,
+                              offset: const Offset(0, 0),
+                              spreadRadius: 5,
+                            ),
+                            // Standard shadow
+                            BoxShadow(
+                              color: AppTheme.starYellow.withOpacity(0.3),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(25),
+                            onTap: _analyzeFloorPlan,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome,
+                                    color: Colors.black87,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'AI Analysis',
+                                    style: TextStyle(
+                                      color: Colors.black87,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  // Recommended badge
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black87.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      'RECOMMENDED',
+                                      style: TextStyle(
+                                        color: Colors.black87,
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _useInteractiveAnnotation,
-                        icon: const Icon(Icons.edit),
-                        label: const Text('Manual Draw'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        height: 50,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(25),
+                          color: const Color(0xFF1565C0).withOpacity(0.9),
+                          border: Border.all(
+                            color: const Color(0xFF1565C0),
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF1565C0).withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(25),
+                            onTap: _useInteractiveAnnotation,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.edit,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Manual Draw',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1046,12 +1267,14 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
           ),
           if (_loading) ...[
             const SizedBox(height: 24),
-            const CircularProgressIndicator(),
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
             const SizedBox(height: 12),
             const Text(
               'Analyzing your floor plan...',
               style: TextStyle(
-                color: Colors.grey,
+                color: Colors.white,
                 fontSize: 14,
               ),
             ),
@@ -1063,6 +1286,15 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    
+    // Initialize stars with current screen size only once per build
+    if (_shootingStars.isNotEmpty && _shootingStars.first.startX == 0) {
+      for (var star in _shootingStars) {
+        star.reset(size);
+      }
+    }
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Stage 1'),
@@ -1074,50 +1306,174 @@ class _HomeMappingScreenState extends State<HomeMappingScreen> with TickerProvid
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header Section with Animation
-                _buildAnimatedHeader(),
-                
-                const SizedBox(height: 12),
-                
-                // Image Display Area
-                _buildImageDisplayArea(),
-                
-                // Upload Buttons
-                if (!_imageSelected) _buildUploadButtons(),
-                
-
-                
-                // Analysis Options (shown when image is selected)
-                if (_imageSelected) 
-                  AnimatedBuilder(
-                    animation: _analysisAnimationController,
-                    builder: (context, child) {
-                      return FadeTransition(
-                        opacity: _analysisFadeAnimation,
-                        child: SlideTransition(
-                          position: _analysisSlideAnimation,
-                          child: _buildAnalysisButtons(),
-                        ),
-                      );
-                    },
-                  ),
-                
-                const SizedBox(height: 32),
-              ],
-            ),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              const Color(0xFF0D47A1), // Deep blue
+              const Color(0xFF1565C0), // Primary blue
+              const Color(0xFF1976D2), // Lighter blue
+            ],
           ),
-          
-          // Tutorial Overlay
-          if (_showTutorial)
-            _buildTutorialPopup(),
-        ],
+        ),
+        child: Stack(
+          children: [
+            // Shooting Stars Background
+            ...(_shootingStars.map((star) => _buildShootingStar(star, size))),
+            
+            // Main Content
+            SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header Section with Animation
+                  _buildAnimatedHeader(),
+                  
+                  const SizedBox(height: 12),
+                  
+                  // Image Display Area
+                  _buildImageDisplayArea(),
+                  
+                  // Upload Buttons
+                  if (!_imageSelected) _buildUploadButtons(),
+                  
+                  // Analysis Options (shown when image is selected)
+                  if (_imageSelected) 
+                    AnimatedBuilder(
+                      animation: _analysisAnimationController,
+                      builder: (context, child) {
+                        return FadeTransition(
+                          opacity: _analysisFadeAnimation,
+                          child: SlideTransition(
+                            position: _analysisSlideAnimation,
+                            child: _buildAnalysisButtons(),
+                          ),
+                        );
+                      },
+                    ),
+                  
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
+            
+            // Tutorial Overlay
+            if (_showTutorial)
+              _buildTutorialPopup(),
+          ],
+        ),
       ),
     );
+  }
+  
+  Widget _buildShootingStar(ShootingStar star, Size screenSize) {
+    return AnimatedBuilder(
+      animation: _starsAnimationController,
+      builder: (context, child) {
+        final progress = (_starsAnimationController.value + star.delay) % 1.0;
+        
+        // Linear interpolation between start and end points (which form a circular path)
+        final xPos = star.startX + (star.endX - star.startX) * progress;
+        final yPos = star.startY + (star.endY - star.startY) * progress;
+        
+        // Reset star position when animation completes
+        if (progress > 0.95) {
+          star.reset(screenSize);
+        }
+        
+        // Realistic shooting star brightness - fade in and out like real stars
+        final opacity = progress < 0.15
+            ? progress / 0.15 // Fade in quickly
+            : progress > 0.8
+                ? (1.0 - progress) / 0.2 // Fade out more gradually
+                : 1.0; // Full brightness in middle
+        
+        return Positioned(
+          left: xPos,
+          top: yPos,
+          child: Transform.rotate(
+            angle: star.angle,
+            child: Container(
+              width: star.size,
+              height: 2, // Thinner for more realistic look
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.starYellow.withOpacity(opacity),
+                    AppTheme.starYellowLight.withOpacity(opacity * 0.8),
+                    AppTheme.starYellow.withOpacity(opacity * 0.3),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.3, 0.7, 1.0],
+                ),
+                borderRadius: BorderRadius.circular(1),
+                boxShadow: opacity > 0.5 ? [
+                  BoxShadow(
+                    color: AppTheme.starYellow.withOpacity(opacity * 0.4),
+                    blurRadius: 4,
+                    spreadRadius: 1,
+                  ),
+                ] : null,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ShootingStar {
+  double startX = 0;
+  double startY = 0;
+  double endX = 0;
+  double endY = 0;
+  double size = 0;
+  double angle = 0;
+  double delay = 0;
+  
+  ShootingStar() {
+    // Stars will be initialized when screen size is available
+    final random = math.Random();
+    size = 15 + random.nextDouble() * 25; // Random size between 15-40
+    delay = random.nextDouble(); // Random delay between 0-1
+  }
+  
+  void reset(Size screenSize) {
+    final random = math.Random();
+    
+    // Randomize size and delay for variety
+    size = 20 + random.nextDouble() * 20; // More reasonable: 20-40px
+    delay = random.nextDouble();
+    
+    // Full screen spread with varied paths
+    if (random.nextBool()) {
+      // Diagonal shooting stars from top-left to bottom-right
+      startX = -50 - random.nextDouble() * 100; // Start off-screen left
+      startY = random.nextDouble() * screenSize.height * 0.6; // Top 60% of screen
+      endX = screenSize.width + 50 + random.nextDouble() * 100; // End off-screen right
+      endY = startY + (random.nextDouble() * 200 + 100); // Move down
+    } else {
+      // Curved arc paths across the middle/bottom area
+      final centerX = screenSize.width * 0.2 + random.nextDouble() * screenSize.width * 0.6;
+      final centerY = screenSize.height * 0.3 + random.nextDouble() * screenSize.height * 0.5;
+      final radius = screenSize.width * 0.2 + random.nextDouble() * screenSize.width * 0.3;
+      
+      // Random arc segment
+      final startAngle = random.nextDouble() * math.pi * 2; // Any starting angle
+      final arcLength = math.pi * 0.3 + random.nextDouble() * math.pi * 0.4; // 54° to 126° arc
+      
+      startX = centerX + radius * math.cos(startAngle);
+      startY = centerY + radius * math.sin(startAngle);
+      endX = centerX + radius * math.cos(startAngle + arcLength);
+      endY = centerY + radius * math.sin(startAngle + arcLength);
+    }
+    
+    // Calculate rotation based on movement direction
+    angle = math.atan2(endY - startY, endX - startX);
   }
 } 
